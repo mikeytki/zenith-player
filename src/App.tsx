@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom'; // 引入传送门
 import { NETEASE_COVER } from '../constants';
 import { Song } from '../types';
 import ProgressBar from './components/ProgressBar';
@@ -19,7 +20,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 const fac = new FastAverageColor();
 
-// 统一按钮样式
 const BUTTON_CLASS = "p-3 bg-white/20 hover:bg-white/30 backdrop-blur-xl border border-white/10 shadow-sm rounded-full text-neutral-600 hover:text-neutral-900 dark:text-neutral-200 dark:hover:text-white transition-all active:scale-95 flex items-center justify-center";
 
 function getAccessibleColor(hex: string, isDarkMode: boolean) {
@@ -74,6 +74,9 @@ const App: React.FC = () => {
   const [toastMessage, setToastMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
   
+  // === Document PiP 状态 ===
+  const [pipWindow, setPipWindow] = useState<Window | null>(null);
+
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
@@ -84,48 +87,95 @@ const App: React.FC = () => {
 
   const showToastMsg = (msg: string) => { setToastMessage(msg); setShowToast(true); };
 
+  // === Document PiP 核心逻辑 ===
+  useEffect(() => {
+    // 当切换到 mini 模式时，尝试打开 PiP 窗口
+    if (viewMode === 'mini') {
+        const openPiP = async () => {
+            // 检查浏览器支持
+            if (!(window as any).documentPictureInPicture) {
+                showToastMsg("Your browser doesn't support Document PiP.");
+                setViewMode('default'); // 回退
+                return;
+            }
+
+            // 如果已经开启，不再重复
+            if (pipWindow) return;
+
+            try {
+                // 1. 请求新窗口 (稍微增加一点高度以容纳完整 UI)
+                const win = await (window as any).documentPictureInPicture.requestWindow({
+                    width: 340,
+                    height: 140,
+                });
+
+                // 2. 复制主窗口的样式表到新窗口，保证样式不丢失
+                [...document.styleSheets].forEach((styleSheet) => {
+                    try {
+                        const cssRules = [...styleSheet.cssRules].map((rule) => rule.cssText).join('');
+                        const style = document.createElement('style');
+                        style.textContent = cssRules;
+                        win.document.head.appendChild(style);
+                    } catch (e) {
+                        const link = document.createElement('link');
+                        link.rel = 'stylesheet';
+                        link.type = 'text/css';
+                        link.href = styleSheet.href || '';
+                        win.document.head.appendChild(link);
+                    }
+                });
+                
+                // 3. 监听关闭事件：用户点 X 关闭窗口时，状态切回 default
+                win.addEventListener('pagehide', () => {
+                    setPipWindow(null);
+                    // [修复 TS 报错] 直接设置，逻辑更稳健
+                    setViewMode('default');
+                });
+
+                setPipWindow(win);
+            } catch (err) {
+                console.error("Failed to open PiP window:", err);
+                setViewMode('default');
+            }
+        };
+        openPiP();
+    } else {
+        // 如果切出 mini 模式 (如变成 default/focus)，关闭 PiP 窗口
+        if (pipWindow) {
+            pipWindow.close();
+            setPipWindow(null);
+        }
+    }
+  }, [viewMode]); // 依赖 viewMode
+
   const initAudioContext = () => {
     if (!audioRef.current || audioContextRef.current) return;
-
     try {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         const ctx = new AudioContextClass();
         const analyserNode = ctx.createAnalyser();
         analyserNode.fftSize = 256; 
-
         if (!sourceRef.current) {
             const source = ctx.createMediaElementSource(audioRef.current);
             source.connect(analyserNode);
             analyserNode.connect(ctx.destination);
             sourceRef.current = source;
         }
-
         audioContextRef.current = ctx;
         setAnalyser(analyserNode);
-    } catch (e) {
-        console.error("Web Audio API init failed:", e);
-    }
+    } catch (e) { console.error("Web Audio API init failed:", e); }
   };
 
   useEffect(() => {
-    if (isPlaying && !audioContextRef.current) {
-        initAudioContext();
-    }
-    if (isPlaying && audioContextRef.current?.state === 'suspended') {
-        audioContextRef.current.resume();
-    }
+    if (isPlaying && !audioContextRef.current) { initAudioContext(); }
+    if (isPlaying && audioContextRef.current?.state === 'suspended') { audioContextRef.current.resume(); }
   }, [isPlaying]);
 
   const handleFullScreenToggle = async () => {
       if (!document.fullscreenElement) {
-          try { 
-              await document.documentElement.requestFullscreen();
-              setViewMode('focus'); 
-          } catch(e) { console.warn(e); }
+          try { await document.documentElement.requestFullscreen(); setViewMode('focus'); } catch(e) { console.warn(e); }
       } else {
-          try { 
-              await document.exitFullscreen(); 
-          } catch(e) { console.warn(e); }
+          try { await document.exitFullscreen(); } catch(e) { console.warn(e); }
       }
   };
 
@@ -176,7 +226,7 @@ const App: React.FC = () => {
 
   useEffect(() => { if (audioRef.current) audioRef.current.volume = volume; }, [volume]);
 
-  const handleImportPlaylist = async (url: string) => {
+  const handleImportPlaylist = async (url: string) => { /* ... existing logic ... */ 
       if (!url) return;
       const qqId = parseQQPlaylistId(url);
       let neteaseId = null;
@@ -245,9 +295,11 @@ const App: React.FC = () => {
         onError={() => { pause(); showToastMsg("Audio Error"); }}
       />
 
+      {/* 主界面背景 - 在 Mini 模式下依然保留背景 */}
       <motion.div 
         className="absolute inset-0 z-0 will-change-transform transform-gpu"
-        animate={{ opacity: viewMode === 'mini' ? 0 : (isDarkMode ? 1 : 0.6) }}
+        // Mini 模式下不隐藏背景，只是主内容不渲染
+        animate={{ opacity: isDarkMode ? 1 : 0.6 }}
         transition={{ duration: 0.5 }}
         style={{ 
             backgroundImage: `url(${currentSong.coverUrl})`, 
@@ -259,7 +311,7 @@ const App: React.FC = () => {
       />
       <div className={`absolute inset-0 z-0 pointer-events-none transition-colors duration-500 ${isDarkMode ? 'bg-black/50' : 'bg-white/30'}`} />
 
-      {/* 顶部按钮组 */}
+      {/* 顶部按钮组 (Mini 模式下隐藏) */}
       <AnimatePresence>
         {viewMode !== 'mini' && (
             <motion.div 
@@ -268,61 +320,23 @@ const App: React.FC = () => {
                 exit={{ opacity: 0, y: -20 }}
                 className="absolute top-6 right-8 z-[60] flex items-center gap-3"
             >
-                <button 
-                    aria-label="Search" title="Search"
-                    onClick={() => setShowSearchModal(true)} 
-                    className={BUTTON_CLASS}
-                >
-                    <Search size={20} strokeWidth={2} />
-                </button>
+                <button aria-label="Search" title="Search" onClick={() => setShowSearchModal(true)} className={BUTTON_CLASS}><Search size={20} strokeWidth={2} /></button>
+                <button aria-label="Toggle Theme" title="Toggle Theme" onClick={toggleDarkMode} className={BUTTON_CLASS}>{isDarkMode ? <Sun size={20} strokeWidth={2} /> : <Moon size={20} strokeWidth={2} />}</button>
                 
-                <button 
-                    aria-label="Toggle Theme" title="Toggle Theme"
-                    onClick={toggleDarkMode} 
-                    className={BUTTON_CLASS}
-                >
-                    {isDarkMode ? <Sun size={20} strokeWidth={2} /> : <Moon size={20} strokeWidth={2} />}
-                </button>
-                
-                {/* Focus 模式：只保留布局切换 */}
                 {viewMode === 'focus' && (
-                    <button 
-                        aria-label="Switch Layout" title="Switch Cover/Lyrics View"
-                        onClick={toggleFocusLayout} 
-                        className={BUTTON_CLASS}
-                    >
-                        <AlignJustify size={20} strokeWidth={2} />
-                    </button>
+                    <button aria-label="Switch Layout" title="Switch Cover/Lyrics View" onClick={toggleFocusLayout} className={BUTTON_CLASS}><AlignJustify size={20} strokeWidth={2} /></button>
                 )}
 
-                {/* Default 模式：显示独立的 Mini 和 Expand 按钮 */}
                 {viewMode === 'default' && (
                     <>
-                        <button 
-                            aria-label="Mini Mode" title="Mini Mode (Picture in Picture)"
-                            onClick={() => setViewMode('mini')} 
-                            className={BUTTON_CLASS}
-                        >
-                            <PictureInPicture2 size={20} strokeWidth={2} />
-                        </button>
-                        <button 
-                            aria-label="Focus Mode" title="Immersive Mode"
-                            onClick={() => setViewMode('focus')} 
-                            className={BUTTON_CLASS}
-                        >
-                            <Maximize2 size={20} strokeWidth={2} />
-                        </button>
+                        {/* 独立的 Mini 按钮 (触发 PiP) */}
+                        <button aria-label="Mini Mode" title="Picture in Picture" onClick={() => setViewMode('mini')} className={BUTTON_CLASS}><PictureInPicture2 size={20} strokeWidth={2} /></button>
+                        {/* 独立的 Focus 按钮 */}
+                        <button aria-label="Focus Mode" title="Immersive Mode" onClick={() => setViewMode('focus')} className={BUTTON_CLASS}><Maximize2 size={20} strokeWidth={2} /></button>
                     </>
                 )}
 
-                {/* Monitor 按钮：全屏沉浸 */}
-                <button 
-                    aria-label="Full Screen Focus" title="Full Screen Immersion"
-                    onClick={handleFullScreenToggle} 
-                    className={BUTTON_CLASS}
-                >
-                    <Monitor size={20} strokeWidth={2} />
-                </button>
+                <button aria-label="Full Screen Focus" title="Full Screen Immersion" onClick={handleFullScreenToggle} className={BUTTON_CLASS}><Monitor size={20} strokeWidth={2} /></button>
             </motion.div>
         )}
       </AnimatePresence>
@@ -339,6 +353,7 @@ const App: React.FC = () => {
                 exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
                 transition={transition}
             >
+                {/* 1APP 比例布局 */}
                 <div className="w-full md:w-[45%] lg:w-[42%] h-full flex flex-col items-center justify-between p-6 md:p-12 relative z-20 shrink-0 bg-white/30 dark:bg-black/20 border-r border-white/10">
                     <div className="w-full flex-1 flex flex-col items-center justify-center min-h-0 gap-6 md:gap-8 mt-4 md:mt-0">
                         <motion.div 
@@ -373,27 +388,23 @@ const App: React.FC = () => {
             </motion.div>
           )}
 
-          {/* === Mode 2: Focus (Immersive Mode) === */}
+          {/* === Mode 2: Focus === */}
           {viewMode === 'focus' && (
             <motion.div 
                 key="focus"
-                className={`absolute inset-0 w-full h-full flex items-center justify-center p-6 md:p-20 pointer-events-auto will-change-transform transform-gpu z-50 overflow-hidden ${focusLayout === 'cover' ? 'flex-col gap-12 md:gap-16' : 'flex-col md:flex-row'}`} // 修复 Bug 1：在 cover 模式下增加 gap
+                // 1APP 比例 + max-h 修复遮挡
+                className={`absolute inset-0 w-full h-full flex items-center justify-center p-6 md:p-20 pointer-events-auto will-change-transform transform-gpu z-50 overflow-hidden ${focusLayout === 'cover' ? 'flex-col gap-12 md:gap-16' : 'flex-col md:flex-row'}`}
             >
                  <div className="absolute inset-0 z-[-1] pointer-events-none opacity-20 mix-blend-overlay">
                     <Visualizer isPlaying={isPlaying} analyser={analyser} mode="fullscreen" themeColor={themeColor} />
                  </div>
 
-                 {/* 布局逻辑：严格分屏 */}
                  {focusLayout === 'cover' ? (
-                   // === Cover Only Layout ===
-                   <motion.div 
-                      layout
-                      className="flex flex-col items-center justify-center w-full h-full"
-                   >
-                       {/* 封面容器：高度自适应修复遮挡问题 */}
+                   <div className="flex flex-col items-center justify-center w-full h-full">
                        <motion.div 
                           layoutId="album-cover"
-                          className="relative w-full max-w-[300px] md:max-w-[600px] aspect-square rounded-[30px] md:rounded-[60px] overflow-hidden shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] dark:shadow-black/80 ring-1 ring-white/10 will-change-transform shrink-1 max-h-[50vh]" // 动态高度 max-h-[50vh]
+                          // max-h-[50vh] 确保小屏幕不被遮挡
+                          className="relative w-full max-w-[300px] md:max-w-[600px] aspect-square rounded-[30px] md:rounded-[60px] overflow-hidden shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] dark:shadow-black/80 ring-1 ring-white/10 will-change-transform shrink-1 max-h-[50vh]"
                           transition={transition}
                        >
                            <motion.img layoutId="album-img" src={currentSong.coverUrl} className="w-full h-full object-cover" alt={currentSong.title} />
@@ -405,42 +416,36 @@ const App: React.FC = () => {
                        </div>
 
                        <motion.div 
-                          layout
                           initial={{ opacity: 0, y: 20 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: 0.3 }}
-                          className="w-full max-w-md bg-white/40 dark:bg-black/40 backdrop-blur-xl p-6 rounded-3xl border border-white/20 shadow-xl flex-shrink-0 mt-8" // 增加 mt-8
+                          className="w-full max-w-md bg-white/40 dark:bg-black/40 backdrop-blur-xl p-6 rounded-3xl border border-white/20 shadow-xl flex-shrink-0 mt-8"
                        >
                            <ProgressBar currentTime={currentTime} duration={duration} onSeek={(t) => { if(audioRef.current) { audioRef.current.currentTime = t; setCurrentTime(t); }}} />
                            <div className="flex justify-center mt-4">
                                <Controls onTogglePlaylist={() => setShowPlaylist(true)} onImport={() => setShowImportModal(true)} />
                            </div>
                        </motion.div>
-                   </motion.div>
+                   </div>
                  ) : (
-                   // === Lyrics Layout ===
-                   // 修复 Bug 2：强制左右 50% 宽度，禁止收缩
                    <>
-                     <motion.div 
-                        className="w-full md:w-1/2 min-w-[50%] max-w-[50%] flex-shrink-0 h-[40vh] md:h-full flex flex-col items-center justify-center gap-8 md:gap-12"
-                     >
+                     {/* 左右分栏固定 50% 宽度，修复晃动 */}
+                     <div className="w-full md:w-1/2 min-w-[50%] max-w-[50%] flex-shrink-0 h-[40vh] md:h-full flex flex-col items-center justify-center gap-8 md:gap-12">
                          <div style={{ perspective: 1000 }} className="flex-shrink-1">
                              <motion.div 
                                 layoutId="album-cover"
-                                className="relative w-[300px] h-[300px] md:w-[500px] md:h-[500px] rounded-[30px] md:rounded-[60px] overflow-hidden shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] dark:shadow-black/80 ring-1 ring-white/10 will-change-transform max-h-[45vh] aspect-square" // 同样加上 max-h 保护
+                                className="relative w-[300px] h-[300px] md:w-[500px] md:h-[500px] rounded-[30px] md:rounded-[60px] overflow-hidden shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] dark:shadow-black/80 ring-1 ring-white/10 will-change-transform max-h-[45vh] aspect-square"
                                 transition={transition}
                              >
-                                 <motion.div className="w-full h-full">
+                                 <div className="w-full h-full">
                                      <motion.img layoutId="album-img" src={currentSong.coverUrl} className="w-full h-full object-cover" alt={currentSong.title} />
-                                 </motion.div>
+                                 </div>
                              </motion.div>
                          </div>
-                         
                          <div className="text-center space-y-4 flex-shrink-0">
                              <motion.h1 layoutId="song-title" className="text-3xl md:text-5xl font-black text-neutral-900 dark:text-white drop-shadow-lg tracking-tight px-4">{currentSong.title}</motion.h1>
                              <motion.p layoutId="song-artist" className="text-lg md:text-2xl font-medium text-neutral-600 dark:text-neutral-300 tracking-widest uppercase">{currentSong.artist}</motion.p>
                          </div>
-
                          <motion.div 
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -452,9 +457,7 @@ const App: React.FC = () => {
                                  <Controls onTogglePlaylist={() => setShowPlaylist(true)} onImport={() => setShowImportModal(true)} />
                              </div>
                          </motion.div>
-                     </motion.div>
-
-                     {/* 右侧歌词：同样强制 50% 宽度 */}
+                     </div>
                      <motion.div 
                         initial={{ opacity: 0, x: 50 }}
                         animate={{ opacity: 1, x: 0 }}
@@ -466,7 +469,6 @@ const App: React.FC = () => {
                    </>
                  )}
 
-                 {/* 底部退出箭头 */}
                  <motion.button
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
@@ -478,55 +480,54 @@ const App: React.FC = () => {
             </motion.div>
           )}
 
-          {/* === Mode 3: Mini === */}
-          {viewMode === 'mini' && (
-            <motion.div 
-                key="mini"
-                initial={{ opacity: 0, y: 100, scale: 0.8 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 100, scale: 0.8 }}
-                transition={{ type: "spring", stiffness: 300, damping: 25 }}
-                className="fixed bottom-6 right-6 z-50 w-80 bg-white/80 dark:bg-black/80 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/20 dark:border-white/10 p-4 flex items-center gap-4 pointer-events-auto overflow-hidden group hover:scale-105 transition-transform duration-300"
-            >
-                <motion.div 
-                    layoutId="album-cover"
-                    className="w-16 h-16 rounded-xl overflow-hidden shadow-md cursor-pointer flex-shrink-0"
-                    onClick={() => setViewMode('default')}
-                >
-                    <motion.img layoutId="album-img" src={currentSong.coverUrl} className="w-full h-full object-cover" alt={currentSong.title} />
-                </motion.div>
+          {/* === Mode 3: Mini (通过 Portal 渲染到 PiP 窗口) - [已修复样式] === */}
+          {viewMode === 'mini' && pipWindow && createPortal(
+            // 1. 外层包裹器：负责传递暗色模式类名和主题色变量，去除丑陋的背景色
+            <div className={`${isDarkMode ? 'dark' : ''} w-full h-full`} style={{ '--theme-color': themeColor } as React.CSSProperties}>
+                {/* 2. 播放器容器：完全复刻原版 Mini 模式的精美样式 (磨砂、边框、圆角) */}
+                <div className="w-full h-full flex items-center gap-4 bg-white/80 dark:bg-black/80 backdrop-blur-2xl p-4 border-t border-white/20 dark:border-white/10 sm:rounded-none">
+                    
+                    {/* 封面 */}
+                    <div className="w-16 h-16 rounded-xl overflow-hidden shadow-md flex-shrink-0">
+                        <img src={currentSong.coverUrl} className="w-full h-full object-cover" alt={currentSong.title} />
+                    </div>
 
-                <div className="flex-1 min-w-0 flex flex-col justify-center">
-                    <motion.h1 layoutId="song-title" className="text-sm font-bold text-neutral-900 dark:text-white truncate">{currentSong.title}</motion.h1>
-                    <motion.p layoutId="song-artist" className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{currentSong.artist}</motion.p>
-                    <div className="w-full h-1 bg-neutral-200 dark:bg-neutral-700 rounded-full mt-2 overflow-hidden">
-                        <div className="h-full bg-[var(--theme-color)] rounded-full" style={{ width: `${(currentTime/duration)*100}%` }}></div>
+                    {/* 文本和进度条 */}
+                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                        <h1 className="text-sm font-bold text-neutral-900 dark:text-white truncate">{currentSong.title}</h1>
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{currentSong.artist}</p>
+                        {/* 进度条：使用 CSS 变量 */}
+                        <div className="w-full h-1 bg-neutral-200 dark:bg-neutral-700 rounded-full mt-2 overflow-hidden">
+                            <div className="h-full bg-[var(--theme-color)] rounded-full" style={{ width: `${(currentTime/duration)*100}%` }}></div>
+                        </div>
+                    </div>
+
+                    {/* 按钮组 */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                        {/* 播放/暂停按钮：复刻原版圆形样式和 SVG 图标，并应用主题色 Hover */}
+                        <button 
+                            onClick={() => isPlaying ? pause() : togglePlay()}
+                            className="w-10 h-10 flex items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white hover:bg-[var(--theme-color)] hover:text-white transition-colors flex-shrink-0"
+                        >
+                            {isPlaying ? (
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+                            ) : (
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9V3z" /></svg>
+                            )}
+                        </button>
+                        
+                        {/* 扩大按钮：关闭 PiP 回到 Focus 模式，使用原版 Maximize2 图标 */}
+                        <button 
+                            aria-label='return close'
+                            onClick={() => { pipWindow.close(); setViewMode('focus'); }}
+                            className="p-2 text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:scale-110 transition-transform"
+                        >
+                            <Maximize2 size={18} />
+                        </button>
                     </div>
                 </div>
-
-                <div className="flex items-center gap-2 flex-shrink-0">
-                     <button 
-                        onClick={() => isPlaying ? pause() : togglePlay()}
-                        aria-label={isPlaying ? "Pause" : "Play"}
-                        title={isPlaying ? "Pause" : "Play"}
-                        className="w-10 h-10 flex items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white hover:bg-[var(--theme-color)] hover:text-white transition-colors flex-shrink-0"
-                     >
-                        {isPlaying ? (
-                             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
-                        ) : (
-                             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9V3z" /></svg>
-                        )}
-                     </button>
-                     <button 
-                         onClick={() => setViewMode('default')}
-                         aria-label="Expand"
-                         title="Expand"
-                         className="p-2 text-neutral-400 hover:text-neutral-900 dark:hover:text-white"
-                     >
-                         <Maximize2 size={16} />
-                     </button>
-                </div>
-            </motion.div>
+            </div>,
+            pipWindow.document.body
           )}
 
         </AnimatePresence>
