@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "module": "ESNext",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "skipLibCheck": true,
+
+    /* [新增] 强制文件名大小写一致 (解决 Webhint 警告) */
+    "forceConsistentCasingInFileNames": true,
+
+    "strict": true,
+
+    "types": [
+      "node",
+      "vite/client" 
+    ],
+    
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  }
+}

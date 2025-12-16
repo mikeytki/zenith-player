@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Music</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" href="https://gcore.jsdelivr.net/gh/mikeytki/CDN/img/music.png" type="image/png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdmirror.com/gh/mikeytki/CDN/css/ZT.css" rel="stylesheet" type="text/css" />
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Mikey', 'Inter', 'sans-serif'],
+              // Assuming the custom CSS might define a specific font, we can try to use it or fallback to serif for lyrics
+              lyric: ['Mikey','ZT', 'Georgia', 'serif'], 
+            },
+            colors: {
+              neutral: {
+                50: '#fafafa',
+                100: '#f5f5f5',
+                200: '#e5e5e5',
+                300: '#d4d4d4',
+                400: '#a3a3a3',
+                500: '#737373',
+                600: '#525252',
+                700: '#404040',
+                800: '#262626',
+                900: '#171717',
+                950: '#0a0a0a',
+              }
+            },
+            animation: {
+              'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'equalizer': 'equalizer 1s ease-in-out infinite',
+              'fade-in': 'fadeIn 0.3s ease-out forwards',
+              'slide-up': 'slideUp 0.3s ease-out forwards',
+            },
+            keyframes: {
+              equalizer: {
+                '0%, 100%': { height: '20%' },
+                '50%': { height: '100%' },
+              },
+              fadeIn: {
+                '0%': { opacity: '0' },
+                '100%': { opacity: '1' },
+              },
+              slideUp: {
+                '0%': { transform: 'translateY(20%)', opacity: '0' },
+                '100%': { transform: 'translateY(0)', opacity: '1' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden; /* Prevent scrolling on the main body */
+      }
+      /* Hide scrollbar for Chrome, Safari and Opera */
+      .no-scrollbar::-webkit-scrollbar {
+          display: none;
+      }
+      /* Hide scrollbar for IE, Edge and Firefox */
+      .no-scrollbar {
+          -ms-overflow-style: none;  /* IE and Edge */
+          scrollbar-width: none;  /* Firefox */
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
