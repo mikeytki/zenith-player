@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom'; // 引入传送门
 import { NETEASE_COVER } from '../constants';
-import { Song } from '../types';
+import { Song, RepeatMode } from '../types'; // [修改] 引入 RepeatMode
 import ProgressBar from './components/ProgressBar';
 import Controls from './components/Controls';
 import Visualizer from './components/Visualizer';
@@ -10,7 +10,7 @@ import Lyrics from './components/Lyrics';
 import Toast from './components/Toast';
 import ImportModal from './components/ImportModal';
 import SearchModal from './components/SearchModal'; 
-import { Moon, Sun, Search, Maximize2, Minimize2, PictureInPicture2, Monitor, AlignJustify, ChevronDown } from 'lucide-react'; 
+import { Moon, Sun, Search, Maximize2, Minimize2, PictureInPicture2, Monitor, AlignJustify, ChevronDown, Expand, LayoutDashboard} from 'lucide-react'; 
 import { FastAverageColor } from 'fast-average-color'; 
 import { useShallow } from 'zustand/react/shallow';
 import { usePlayerStore } from './store/usePlayerStore'; 
@@ -38,7 +38,7 @@ function getAccessibleColor(hex: string, isDarkMode: boolean) {
 
 const App: React.FC = () => {
   const { 
-    isPlaying, volume, isDarkMode, viewMode, focusLayout,
+    isPlaying, volume, isDarkMode, viewMode, focusLayout, repeatMode, // [修改] 获取 repeatMode
     togglePlay, toggleDarkMode,
     getCurrentSong,
     addPlaylist, nextSong, prevSong, pause, updateSongLyric,
@@ -50,6 +50,7 @@ const App: React.FC = () => {
       isDarkMode: state.isDarkMode,
       viewMode: state.viewMode,
       focusLayout: state.focusLayout,
+      repeatMode: state.repeatMode, // [新增] 映射 repeatMode
       togglePlay: state.togglePlay,
       toggleDarkMode: state.toggleDarkMode,
       getCurrentSong: state.getCurrentSong,
@@ -128,7 +129,6 @@ const App: React.FC = () => {
                 // 3. 监听关闭事件：用户点 X 关闭窗口时，状态切回 default
                 win.addEventListener('pagehide', () => {
                     setPipWindow(null);
-                    // [修复 TS 报错] 直接设置，逻辑更稳健
                     setViewMode('default');
                 });
 
@@ -226,7 +226,21 @@ const App: React.FC = () => {
 
   useEffect(() => { if (audioRef.current) audioRef.current.volume = volume; }, [volume]);
 
-  const handleImportPlaylist = async (url: string) => { /* ... existing logic ... */ 
+  // [修改] 处理播放结束的逻辑
+  const handleAudioEnded = () => {
+    // 关键修复：如果是单曲循环，不要切歌，直接重播
+    if (repeatMode === RepeatMode.ONE) {
+        if (audioRef.current) {
+            audioRef.current.currentTime = 0;
+            audioRef.current.play();
+        }
+    } else {
+        // 列表循环或随机播放，才切下一首
+        nextSong();
+    }
+  };
+
+  const handleImportPlaylist = async (url: string) => { 
       if (!url) return;
       const qqId = parseQQPlaylistId(url);
       let neteaseId = null;
@@ -289,7 +303,7 @@ const App: React.FC = () => {
         ref={audioRef}
         src={currentSong.audioUrl}
         crossOrigin="anonymous"
-        onEnded={() => nextSong()}
+        onEnded={handleAudioEnded} // [修改] 使用新的处理函数
         onTimeUpdate={() => { if(audioRef.current) setCurrentTime(audioRef.current.currentTime); }}
         onLoadedMetadata={() => { if (audioRef.current) { setDuration(audioRef.current.duration); audioRef.current.volume = volume; } }}
         onError={() => { pause(); showToastMsg("Audio Error"); }}
@@ -324,7 +338,7 @@ const App: React.FC = () => {
                 <button aria-label="Toggle Theme" title="Toggle Theme" onClick={toggleDarkMode} className={BUTTON_CLASS}>{isDarkMode ? <Sun size={20} strokeWidth={2} /> : <Moon size={20} strokeWidth={2} />}</button>
                 
                 {viewMode === 'focus' && (
-                    <button aria-label="Switch Layout" title="Switch Cover/Lyrics View" onClick={toggleFocusLayout} className={BUTTON_CLASS}><AlignJustify size={20} strokeWidth={2} /></button>
+                    <button aria-label="Switch Layout" title="Switch Cover/Lyrics View" onClick={toggleFocusLayout} className={BUTTON_CLASS}><LayoutDashboard size={20} strokeWidth={2} /></button>
                 )}
 
                 {viewMode === 'default' && (
@@ -332,7 +346,7 @@ const App: React.FC = () => {
                         {/* 独立的 Mini 按钮 (触发 PiP) */}
                         <button aria-label="Mini Mode" title="Picture in Picture" onClick={() => setViewMode('mini')} className={BUTTON_CLASS}><PictureInPicture2 size={20} strokeWidth={2} /></button>
                         {/* 独立的 Focus 按钮 */}
-                        <button aria-label="Focus Mode" title="Immersive Mode" onClick={() => setViewMode('focus')} className={BUTTON_CLASS}><Maximize2 size={20} strokeWidth={2} /></button>
+                        <button aria-label="Focus Mode" title="Immersive Mode" onClick={() => setViewMode('focus')} className={BUTTON_CLASS}><Expand size={20} strokeWidth={2} /></button>
                     </>
                 )}
 
@@ -374,7 +388,12 @@ const App: React.FC = () => {
                             <Visualizer isPlaying={isPlaying} analyser={analyser} themeColor={themeColor} />
                         </div>
                         <ProgressBar currentTime={currentTime} duration={duration} onSeek={(t) => { if(audioRef.current) { audioRef.current.currentTime = t; setCurrentTime(t); }}} />
-                        <Controls onTogglePlaylist={() => setShowPlaylist(true)} onImport={() => setShowImportModal(true)} />
+                        {/* [修改] 传递 showToastMsg 给 Controls */}
+                        <Controls 
+                            onTogglePlaylist={() => setShowPlaylist(true)} 
+                            onImport={() => setShowImportModal(true)} 
+                            onToast={showToastMsg} // [新增]
+                        />
                     </div>
                 </div>
                 <div className="hidden md:block w-[1px] my-16 bg-gradient-to-b from-transparent via-neutral-300 dark:via-neutral-700 to-transparent opacity-30"></div>
@@ -419,11 +438,16 @@ const App: React.FC = () => {
                           initial={{ opacity: 0, y: 20 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: 0.3 }}
-                          className="w-full max-w-md bg-white/40 dark:bg-black/40 backdrop-blur-xl p-6 rounded-3xl border border-white/20 shadow-xl flex-shrink-0 mt-8"
-                       >
+                          className="w-full max-w-md bg-white/40 dark:bg-black/40 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-white/20 shadow-xl flex-shrink-0 mt-6 md:mt-8"
+                            >           
                            <ProgressBar currentTime={currentTime} duration={duration} onSeek={(t) => { if(audioRef.current) { audioRef.current.currentTime = t; setCurrentTime(t); }}} />
                            <div className="flex justify-center mt-4">
-                               <Controls onTogglePlaylist={() => setShowPlaylist(true)} onImport={() => setShowImportModal(true)} />
+                               {/* [修改] 传递 showToastMsg 给 Controls */}
+                               <Controls 
+                                   onTogglePlaylist={() => setShowPlaylist(true)} 
+                                   onImport={() => setShowImportModal(true)} 
+                                   onToast={showToastMsg} // [新增]
+                               />
                            </div>
                        </motion.div>
                    </div>
@@ -454,7 +478,12 @@ const App: React.FC = () => {
                          >
                              <ProgressBar currentTime={currentTime} duration={duration} onSeek={(t) => { if(audioRef.current) { audioRef.current.currentTime = t; setCurrentTime(t); }}} />
                              <div className="flex justify-center mt-4">
-                                 <Controls onTogglePlaylist={() => setShowPlaylist(true)} onImport={() => setShowImportModal(true)} />
+                                 {/* [修改] 传递 showToastMsg 给 Controls */}
+                                 <Controls 
+                                     onTogglePlaylist={() => setShowPlaylist(true)} 
+                                     onImport={() => setShowImportModal(true)} 
+                                     onToast={showToastMsg} // [新增]
+                                 />
                              </div>
                          </motion.div>
                      </div>
