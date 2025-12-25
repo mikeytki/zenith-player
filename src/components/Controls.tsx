@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Heart, Repeat, Repeat1, ListMusic, Shuffle, ListOrdered, CloudDownload, Volume2, VolumeX, Volume1 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'framer-motion';
@@ -143,38 +143,20 @@ const Controls: React.FC<ControlsProps> = ({ onTogglePlaylist, onImport, onToast
           <SkipBack strokeWidth={1.5} className="w-6 h-6 md:w-8 md:h-8" />
         </button>
 
-        <div className="relative flex items-center justify-center">
-            {isPlaying && (
-                <motion.div
-                    className="absolute inset-0 rounded-full blur-xl opacity-50"
-                    style={{ backgroundColor: 'var(--theme-color)' }}
-                    animate={{ 
-                        scale: [1, 1.3, 1],
-                        opacity: [0.3, 0.6, 0.3]
-                    }}
-                    transition={{ 
-                        duration: 2, 
-                        repeat: Infinity, 
-                        ease: "easeInOut" 
-                    }}
-                />
-            )}
-
-            <button 
-              onClick={wrapClick(togglePlay, 'medium')}
-              aria-label={isPlaying ? "Pause" : "Play"}
-              // [响应式修复] 按钮：手机 w-14 h-14，电脑 w-20 h-20
-              className={`relative z-10 group flex items-center justify-center w-14 h-14 md:w-20 md:h-20 rounded-full shadow-xl md:shadow-2xl shadow-neutral-300 dark:shadow-black/50 hover:scale-105 active:scale-95 transition-all duration-300 ${isDarkMode ? 'text-neutral-900' : 'text-white'}`}
-              style={{ backgroundColor: 'var(--theme-color)' }}
-            >
-              {isPlaying ? (
-                // [响应式修复] 图标
-                <Pause strokeWidth={1.5} className="w-6 h-6 md:w-8 md:h-8 fill-current" />
-              ) : (
-                <Play strokeWidth={1.5} className="ml-1 w-6 h-6 md:w-8 md:h-8 fill-current" />
-              )}
-            </button>
-        </div>
+        <button
+          onClick={wrapClick(togglePlay, 'medium')}
+          aria-label={isPlaying ? "Pause" : "Play"}
+          // [响应式修复] 按钮：手机 w-14 h-14，电脑 w-20 h-20
+          className={`relative z-10 group flex items-center justify-center w-14 h-14 md:w-20 md:h-20 rounded-full shadow-xl md:shadow-2xl shadow-neutral-300 dark:shadow-black/50 hover:scale-105 active:scale-95 transition-all duration-300 ${isDarkMode ? 'text-neutral-900' : 'text-white'}`}
+          style={{ backgroundColor: 'var(--theme-color)' }}
+        >
+          {isPlaying ? (
+            // [响应式修复] 图标
+            <Pause strokeWidth={1.5} className="w-6 h-6 md:w-8 md:h-8 fill-current" />
+          ) : (
+            <Play strokeWidth={1.5} className="ml-1 w-6 h-6 md:w-8 md:h-8 fill-current" />
+          )}
+        </button>
 
         <button 
           onClick={wrapClick(nextSong)}
@@ -262,4 +244,4 @@ const Controls: React.FC<ControlsProps> = ({ onTogglePlaylist, onImport, onToast
   );
 };
 
-export default Controls;
+export default memo(Controls);

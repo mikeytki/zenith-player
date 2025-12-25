@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, ListMusic, BarChart2, PenLine, Trash2, CheckSquare, Square, Library, Cloud, CloudDownload, LocateFixed } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { X, ListMusic, BarChart2, PenLine, Trash2, CheckSquare, Square, Library, Cloud, CloudDownload, LocateFixed, GripVertical, History } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
-import { motion, AnimatePresence, Variants } from 'framer-motion';
+import { motion, AnimatePresence, Variants, useMotionValue } from 'framer-motion';
 import { triggerHaptic } from '../../utils';
 import ConfirmModal from './ConfirmModal';
-import { usePlayerStore } from '../store/usePlayerStore';
-import { Song } from '../../types';
+import { usePlayerStore, PlayHistoryItem } from '../store/usePlayerStore';
+import { Song, PlaylistData } from '../../types';
 
 interface PlaylistProps {
   onClose: () => void;
@@ -13,37 +13,43 @@ interface PlaylistProps {
   onImport: () => void;
 }
 
-// [优化 1] 移除 layoutId，保留纯 CSS 变换动画，极大提升性能
-const SongRow = React.memo(({ 
-    song, index, isActive, isEditing, isSelected, onClick, onToggleSelect, onDelete 
-}: { 
-    song: Song, index: number, isActive: boolean, isEditing: boolean, isSelected: boolean, 
-    onClick: () => void, onToggleSelect: (id: string) => void, onDelete: (e: React.MouseEvent, id: string) => void 
-}) => {
-    const itemVariants: Variants = {
-        hidden: { opacity: 0, y: 10 },
-        visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 30 } }
-    };
+// 统一样式
+const styles = {
+  activeTab: 'bg-[var(--theme-color)] text-white border-transparent shadow-md',
+  inactiveTab: 'bg-white/50 dark:bg-white/10 text-neutral-600 dark:text-neutral-300 border-white/30 dark:border-white/10 hover:bg-white/70 dark:hover:bg-white/20',
+};
 
+const SongRow = React.memo(({
+    song, index, isActive, isEditing, isSelected, isDragging, onClick, onToggleSelect, onDelete
+}: {
+    song: Song, index: number, isActive: boolean, isEditing: boolean, isSelected: boolean, isDragging?: boolean,
+    onClick: () => void, onToggleSelect: (id: string) => void, onDelete: (e: React.MouseEvent, id: string) => void
+}) => {
     return (
-        <motion.div 
+        <div
             id={isActive ? 'active-song' : undefined}
-            variants={itemVariants}
             onClick={() => isEditing ? onToggleSelect(song.id) : onClick()}
-            className={`group flex items-center justify-between p-3 rounded-2xl cursor-pointer transition-colors duration-200 select-none relative overflow-hidden ${
-                isEditing 
-                    ? isSelected ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/30' 
-                    : isActive ? 'bg-neutral-100 dark:bg-neutral-800 shadow-sm' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
+            className={`group flex items-center justify-between p-3 rounded-2xl cursor-pointer transition-colors select-none relative overflow-hidden ${
+                isDragging
+                    ? 'bg-neutral-200 dark:bg-neutral-700 shadow-lg scale-[1.02] z-50'
+                    : isEditing
+                        ? isSelected ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/30'
+                        : isActive ? 'bg-neutral-100 dark:bg-neutral-800 shadow-sm' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
             }`}
         >
             <div className="flex items-center gap-4 min-w-0 z-10 w-full">
                 {isEditing && (
-                    <div className={`transition-all ${isSelected ? 'text-neutral-900 dark:text-white' : 'text-neutral-300'}`}>
-                        {isSelected ? <CheckSquare size={20} strokeWidth={1.5} /> : <Square size={20} strokeWidth={1.5} />}
-                    </div>
+                    <>
+                        <div className="cursor-grab active:cursor-grabbing text-neutral-300 hover:text-neutral-500 dark:text-neutral-600 dark:hover:text-neutral-400 transition-colors">
+                            <GripVertical size={18} />
+                        </div>
+                        <div className={`transition-colors ${isSelected ? 'text-neutral-900 dark:text-white' : 'text-neutral-300'}`}>
+                            {isSelected ? <CheckSquare size={20} strokeWidth={1.5} /> : <Square size={20} strokeWidth={1.5} />}
+                        </div>
+                    </>
                 )}
-                
-                <div className={`relative w-11 h-11 rounded-xl overflow-hidden flex-shrink-0 transition-all ${isActive && !isEditing ? 'shadow-md ring-2 ring-white dark:ring-neutral-700' : ''}`}>
+
+                <div className={`relative w-11 h-11 rounded-xl overflow-hidden flex-shrink-0 ${isActive && !isEditing ? 'shadow-md ring-2 ring-white dark:ring-neutral-700' : ''}`}>
                     <img loading="lazy" src={song.coverUrl} className="w-full h-full object-cover" alt={song.title} />
                     {isActive && !isEditing && (
                         <div className="absolute inset-0 bg-neutral-900/40 flex items-center justify-center">
@@ -62,24 +68,34 @@ const SongRow = React.memo(({
                 </div>
 
                 {isEditing && (
-                    <button 
+                    <button
                         aria-label="Delete song"
                         title="Delete song"
-                        onClick={(e) => onDelete(e, song.id)} 
+                        onClick={(e) => onDelete(e, song.id)}
                         className="p-2 text-neutral-300 hover:text-red-500 transition-colors"
                     >
                         <Trash2 size={18} strokeWidth={1.5} />
                     </button>
                 )}
             </div>
-        </motion.div>
+        </div>
     );
 });
 
+// Tab 项类型
+interface TabItem {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  isHistory: boolean;
+  songCount: number;
+}
+
 const Playlist: React.FC<PlaylistProps> = ({ onClose, isOpen, onImport }) => {
-  const { 
-    playlists, activePlaylistId, currentSongIndex, 
-    switchPlaylist, removePlaylist, selectSong, deleteSongs 
+  const {
+    playlists, activePlaylistId, currentSongIndex,
+    switchPlaylist, removePlaylist, selectSong, deleteSongs,
+    playHistory, clearPlayHistory, playFromHistory
   } = usePlayerStore(useShallow(state => ({
       playlists: state.playlists,
       activePlaylistId: state.activePlaylistId,
@@ -87,20 +103,87 @@ const Playlist: React.FC<PlaylistProps> = ({ onClose, isOpen, onImport }) => {
       switchPlaylist: state.switchPlaylist,
       removePlaylist: state.removePlaylist,
       selectSong: state.selectSong,
-      deleteSongs: state.deleteSongs
+      deleteSongs: state.deleteSongs,
+      playHistory: state.playHistory,
+      clearPlayHistory: state.clearPlayHistory,
+      playFromHistory: state.playFromHistory
   })));
 
-  // [优化 2] 移除 useTransition，保证状态更新是即时且同步的
+  const HISTORY_TAB_ID = '__play_history__';
+
   const [isEditing, setIsEditing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [playlistToDelete, setPlaylistToDelete] = useState<{id: string, name: string} | null>(null);
+  const [activeTab, setActiveTab] = useState<string>(activePlaylistId);
+  
+  // 滚动位置（以 Tab 索引为单位）
+  const [scrollIndex, setScrollIndex] = useState(0);
+  
+  // 拖拽相关
+  const dragX = useMotionValue(0);
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const tabContainerRef = useRef<HTMLDivElement>(null);
+  const TAB_WIDTH = 120; // 弹窗中 Tab 更大
 
-  const currentSongs = playlists.find(p => p.id === activePlaylistId)?.songs || [];
-  const tabsRef = useRef<HTMLDivElement>(null);
+  const isHistoryTab = activeTab === HISTORY_TAB_ID;
+
+  // 构建所有 Tab 项（包括 History）
+  const allTabs: TabItem[] = useMemo(() => {
+    const tabs: TabItem[] = playlists.map(p => ({
+      id: p.id,
+      name: p.name,
+      isDefault: p.id === 'default',
+      isHistory: false,
+      songCount: p.songs.length
+    }));
+    tabs.push({
+      id: HISTORY_TAB_ID,
+      name: 'History',
+      isDefault: false,
+      isHistory: true,
+      songCount: playHistory.length
+    });
+    return tabs;
+  }, [playlists, playHistory.length]);
+
+  // 找到当前激活 Tab 的索引
+  const activeTabIndex = useMemo(() => {
+    return allTabs.findIndex(t => t.id === activeTab);
+  }, [allTabs, activeTab]);
+
+  // 计算可见的 Tabs（基于 scrollIndex）
+  const visibleTabs = useMemo(() => {
+    if (allTabs.length === 0) return [];
+    
+    const total = allTabs.length;
+    const result: (TabItem & { position: number; actualIndex: number })[] = [];
+    
+    // 弹窗更大，显示更多 Tab
+    const visibleCount = Math.min(7, total);
+    const halfVisible = Math.floor(visibleCount / 2);
+    
+    const centerIndex = Math.round(scrollIndex);
+    
+    for (let i = -halfVisible; i <= halfVisible; i++) {
+      const actualIndex = ((centerIndex + i) % total + total) % total;
+      result.push({
+        ...allTabs[actualIndex],
+        position: i,
+        actualIndex
+      });
+    }
+    
+    return result;
+  }, [allTabs, scrollIndex]);
+
+  const currentSongs = isHistoryTab
+    ? playHistory.map(item => item.song)
+    : playlists.find(p => p.id === activeTab)?.songs || [];
+
   const listContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToCurrentSong = useCallback(() => {
-    // 稍微延时以确保 DOM 已经渲染
     requestAnimationFrame(() => {
         setTimeout(() => {
             const container = listContainerRef.current;
@@ -113,23 +196,20 @@ const Playlist: React.FC<PlaylistProps> = ({ onClose, isOpen, onImport }) => {
     });
   }, []);
 
-  const scrollToActiveTab = useCallback(() => {
-    requestAnimationFrame(() => {
-        setTimeout(() => {
-            const container = tabsRef.current;
-            const activeTab = container?.querySelector(`[data-id="${activePlaylistId}"]`) as HTMLElement;
-            if (activeTab && container) {
-                const targetScrollLeft = activeTab.offsetLeft - (container.clientWidth / 2) + (activeTab.clientWidth / 2);
-                container.scrollTo({ left: targetScrollLeft, behavior: 'smooth' });
-            }
-        }, 100);
-    });
-  }, [activePlaylistId]);
+  // 将指定 Tab 滚动到 C 位
+  const scrollTabToCenter = useCallback((tabId: string) => {
+    const index = allTabs.findIndex(t => t.id === tabId);
+    if (index !== -1) {
+      setScrollIndex(index);
+    }
+  }, [allTabs]);
 
   useEffect(() => {
     if (isOpen) {
+        // 打开时：同步到当前播放列表，并将其滚动到 C 位
+        setActiveTab(activePlaylistId);
+        scrollTabToCenter(activePlaylistId);
         scrollToCurrentSong();
-        scrollToActiveTab();
     } else {
         const timer = setTimeout(() => {
             setIsEditing(false);
@@ -138,18 +218,17 @@ const Playlist: React.FC<PlaylistProps> = ({ onClose, isOpen, onImport }) => {
         }, 500);
         return () => clearTimeout(timer);
     }
-  }, [isOpen, scrollToCurrentSong, scrollToActiveTab]);
+  }, [isOpen, scrollToCurrentSong, activePlaylistId, scrollTabToCenter]);
 
   // 监听歌单切换，触发滚动
   useEffect(() => {
-    if(isOpen) {
-        // 稍微延时等待动画开始
+    if(isOpen && !isHistoryTab) {
         const timer = setTimeout(() => {
             scrollToCurrentSong();
         }, 200);
         return () => clearTimeout(timer);
     }
-  }, [activePlaylistId, isOpen, scrollToCurrentSong]);
+  }, [activeTab, isOpen, scrollToCurrentSong, isHistoryTab]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -160,10 +239,14 @@ const Playlist: React.FC<PlaylistProps> = ({ onClose, isOpen, onImport }) => {
     triggerHaptic('tick');
   }, []);
 
-  const handleRowClick = useCallback((index: number) => {
+  const handleRowClick = useCallback((index: number, song?: Song) => {
       triggerHaptic('light');
-      selectSong(index);
-  }, [selectSong]);
+      if (isHistoryTab && song) {
+          playFromHistory(song);
+      } else {
+          selectSong(index);
+      }
+  }, [selectSong, playFromHistory, isHistoryTab]);
 
   const handleSingleDelete = useCallback((e: React.MouseEvent, id: string) => {
     e.stopPropagation();
@@ -184,48 +267,135 @@ const Playlist: React.FC<PlaylistProps> = ({ onClose, isOpen, onImport }) => {
     setSelectedIds(new Set());
   };
 
-  const handleSwitchPlaylist = (id: string) => {
+  // 点击 Tab：切换歌单并将其滚动到 C 位
+  const handleTabClick = (tab: TabItem & { position: number; actualIndex: number }) => {
+    if (isDragging.current) return;
+    
+    triggerHaptic('light');
+    
+    // 切换歌单
+    setActiveTab(tab.id);
+    if (tab.id !== HISTORY_TAB_ID) {
+      switchPlaylist(tab.id);
+    }
+    
+    // 将点击的 Tab 滚动到 C 位
+    setScrollIndex(tab.actualIndex);
+  };
+
+  // 拖拽处理
+  const handleDragStart = (e: React.PointerEvent) => {
+    isDragging.current = false;
+    dragStartX.current = e.clientX;
+    dragX.set(0);
+  };
+
+  const handleDragMove = (e: React.PointerEvent) => {
+    if (e.buttons === 0) return;
+    
+    const deltaX = e.clientX - dragStartX.current;
+    
+    if (Math.abs(deltaX) > 5) {
+      isDragging.current = true;
+    }
+    
+    dragX.set(deltaX);
+  };
+
+  const handleDragEnd = (e: React.PointerEvent) => {
+    const deltaX = e.clientX - dragStartX.current;
+    
+    if (isDragging.current && Math.abs(deltaX) > 40) {
+      const tabsToMove = Math.round(-deltaX / TAB_WIDTH);
+      const total = allTabs.length;
+      const newIndex = ((scrollIndex + tabsToMove) % total + total) % total;
+      
+      setScrollIndex(newIndex);
       triggerHaptic('light');
-      // [优化 3] 直接切换，不使用 startTransition，让 React 立即响应
-      switchPlaylist(id);
+    }
+    
+    dragX.set(0);
+    isDragging.current = false;
+  };
+
+  // 触摸事件处理
+  const touchStartX = useRef(0);
+  
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    isDragging.current = false;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const deltaX = e.touches[0].clientX - touchStartX.current;
+    
+    if (Math.abs(deltaX) > 5) {
+      isDragging.current = true;
+    }
+    
+    dragX.set(deltaX);
+  };
+
+  const handleTouchEnd = () => {
+    const deltaX = dragX.get();
+    
+    if (isDragging.current && Math.abs(deltaX) > 40) {
+      const tabsToMove = Math.round(-deltaX / TAB_WIDTH);
+      const total = allTabs.length;
+      const newIndex = ((scrollIndex + tabsToMove) % total + total) % total;
+      
+      setScrollIndex(newIndex);
+      triggerHaptic('light');
+    }
+    
+    dragX.set(0);
+    isDragging.current = false;
+  };
+
+  // 获取 Tab 的样式
+  const getTabStyle = (position: number, isActive: boolean) => {
+    const baseStyle = isActive ? styles.activeTab : styles.inactiveTab;
+    
+    const absPos = Math.abs(position);
+    let opacity = 1;
+    let scale = 1;
+    
+    if (absPos === 1) {
+      opacity = 0.85;
+      scale = 0.97;
+    } else if (absPos === 2) {
+      opacity = 0.6;
+      scale = 0.93;
+    } else if (absPos >= 3) {
+      opacity = 0.4;
+      scale = 0.88;
+    }
+    
+    return {
+      className: baseStyle,
+      opacity,
+      scale
+    };
   };
 
   const containerVariants: Variants = {
       hidden: { y: "100%", opacity: 0 },
-      visible: { 
-          y: 0, 
+      visible: {
+          y: 0,
           opacity: 1,
-          transition: { 
-              type: "spring", 
-              damping: 30, 
-              stiffness: 300,
-              staggerChildren: 0.03,
-              delayChildren: 0.1 
-          } 
+          transition: { type: "spring", damping: 30, stiffness: 300 }
       },
-      exit: { 
-          y: "100%", 
+      exit: {
+          y: "100%",
           opacity: 0,
-          transition: { type: "spring", damping: 30, stiffness: 300 } 
+          transition: { type: "spring", damping: 30, stiffness: 300 }
       }
   };
 
-  // [优化 4] 新增：专门用于列表切换的 variants，避免每次重新渲染整个 modal
   const listVariants: Variants = {
-      hidden: { opacity: 0, x: -20 },
-      visible: { 
-          opacity: 1, 
-          x: 0,
-          transition: { 
-              duration: 0.2,
-              staggerChildren: 0.02 // 更快的级联
-          }
-      },
-      exit: { 
-          opacity: 0, 
-          x: 20,
-          transition: { duration: 0.1 } 
-      }
+      hidden: { opacity: 0 },
+      visible: { opacity: 1, transition: { duration: 0.15 } },
+      exit: { opacity: 0, transition: { duration: 0.1 } }
   };
 
   return (
@@ -247,21 +417,21 @@ const Playlist: React.FC<PlaylistProps> = ({ onClose, isOpen, onImport }) => {
                     isDanger={true}
                 />
 
-                <motion.div 
-                    initial={{ opacity: 0 }} 
-                    animate={{ opacity: 1 }} 
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="absolute inset-0 z-40 bg-black/20 dark:bg-black/40 backdrop-blur-sm"
+                    className="absolute inset-0 z-[70] bg-black/20 dark:bg-black/40 backdrop-blur-sm"
                     onClick={onClose}
                 />
 
-                <motion.div 
+                <motion.div
                     variants={containerVariants}
                     initial="hidden"
                     animate="visible"
                     exit="exit"
                     style={{ willChange: "transform" }}
-                    className="absolute inset-0 top-20 z-50 bg-white/90 dark:bg-neutral-900/90 backdrop-blur-2xl rounded-t-[40px] flex flex-col p-6 shadow-2xl overflow-hidden"
+                    className="absolute inset-0 top-20 z-[80] bg-white/90 dark:bg-neutral-900/90 backdrop-blur-2xl rounded-t-[40px] flex flex-col p-6 shadow-2xl overflow-hidden"
                     drag="y"
                     dragConstraints={{ top: 0, bottom: 0 }}
                     dragElastic={0.2}
@@ -322,34 +492,86 @@ const Playlist: React.FC<PlaylistProps> = ({ onClose, isOpen, onImport }) => {
                         </div>
                     </div>
 
-                    <div ref={tabsRef} className="flex items-center gap-2 mb-4 p-1 overflow-x-auto no-scrollbar mask-gradient-right snap-x flex-shrink-0">
-                        {playlists.map(playlist => {
-                            const isActive = playlist.id === activePlaylistId;
-                            const isDefault = playlist.id === 'default';
+                    {/* 可滑动的 Tabs */}
+                    <div 
+                      ref={tabContainerRef}
+                      className="relative flex items-center justify-center gap-2 mb-4 p-2 overflow-hidden flex-shrink-0 cursor-grab active:cursor-grabbing select-none"
+                      onPointerDown={handleDragStart}
+                      onPointerMove={handleDragMove}
+                      onPointerUp={handleDragEnd}
+                      onPointerLeave={handleDragEnd}
+                      onTouchStart={handleTouchStart}
+                      onTouchMove={handleTouchMove}
+                      onTouchEnd={handleTouchEnd}
+                      style={{ touchAction: 'pan-y' }}
+                    >
+                      <motion.div 
+                        className="flex items-center justify-center gap-2"
+                        style={{ x: dragX }}
+                      >
+                        <AnimatePresence mode="popLayout">
+                          {visibleTabs.map((tab) => {
+                            const isCurrentActive = tab.id === activeTab;
+                            const tabStyle = getTabStyle(tab.position, isCurrentActive);
+                            
                             return (
-                                <div key={playlist.id} className="relative group snap-start flex-shrink-0">
-                                    <button
-                                        data-id={playlist.id}
-                                        onClick={() => handleSwitchPlaylist(playlist.id)}
-                                        className={`flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-300 border ${isActive ? 'bg-neutral-900 dark:bg-white text-white dark:text-black border-transparent shadow-md' : 'bg-white dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800'}`}
-                                    >
-                                        {isDefault ? <ListMusic size={14}/> : <Cloud size={14}/>}
-                                        <span className="max-w-[100px] truncate">{playlist.name}</span>
-                                        <span className="opacity-50 text-[10px]">({playlist.songs.length})</span>
-                                    </button>
-                                    {!isDefault && (
-                                        <button 
-                                            aria-label={`Delete playlist ${playlist.name}`}
-                                            title={`Delete playlist ${playlist.name}`}
-                                            onClick={(e) => { e.stopPropagation(); triggerHaptic('light'); setPlaylistToDelete({ id: playlist.id, name: playlist.name }); }} 
-                                            className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 scale-75 transition-all group-hover:opacity-100 group-hover:scale-100 z-10 shadow-sm"
-                                        >
-                                            <X size={10} strokeWidth={3} />
-                                        </button>
-                                    )}
-                                </div>
-                            )
+                              <motion.div
+                                key={`${tab.id}-${tab.position}`}
+                                layout
+                                initial={{ opacity: 0, scale: 0.8 }}
+                                animate={{ opacity: tabStyle.opacity, scale: tabStyle.scale }}
+                                exit={{ opacity: 0, scale: 0.8 }}
+                                transition={{ duration: 0.2 }}
+                                className="relative group flex-shrink-0"
+                              >
+                                <button
+                                  data-id={tab.id}
+                                  onClick={() => handleTabClick(tab)}
+                                  className={`flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors border ${tabStyle.className}`}
+                                >
+                                  {tab.isHistory ? (
+                                    <History size={14} />
+                                  ) : tab.isDefault ? (
+                                    <ListMusic size={14} />
+                                  ) : (
+                                    <Cloud size={14} />
+                                  )}
+                                  <span className="max-w-[100px] truncate">{tab.name}</span>
+                                  <span className="opacity-50 text-[10px]">({tab.songCount})</span>
+                                </button>
+                                {/* 删除按钮（非默认、非历史，且在 C 位） */}
+                                {!tab.isDefault && !tab.isHistory && tab.position === 0 && (
+                                  <button
+                                    aria-label={`Delete playlist ${tab.name}`}
+                                    title={`Delete playlist ${tab.name}`}
+                                    onClick={(e) => { 
+                                      e.stopPropagation(); 
+                                      triggerHaptic('light'); 
+                                      setPlaylistToDelete({ id: tab.id, name: tab.name }); 
+                                    }}
+                                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 scale-75 transition-all group-hover:opacity-100 group-hover:scale-100 z-10 shadow-sm"
+                                  >
+                                    <X size={10} strokeWidth={3} />
+                                  </button>
+                                )}
+                              </motion.div>
+                            );
+                          })}
+                        </AnimatePresence>
+                      </motion.div>
+                      
+                      {/* 滑动指示器 */}
+                      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 flex gap-1">
+                        {allTabs.map((tab, i) => {
+                          const isCurrent = i === Math.round(scrollIndex);
+                          return (
+                            <div 
+                              key={tab.id} 
+                              className={`w-1.5 h-1.5 rounded-full transition-colors ${isCurrent ? 'bg-[var(--theme-color)]' : 'bg-neutral-300 dark:bg-neutral-600'}`}
+                            />
+                          );
                         })}
+                      </div>
                     </div>
 
                     <div className={`w-full flex items-center justify-between mb-2 px-2 overflow-hidden transition-all duration-300 flex-shrink-0 ${isEditing ? 'max-h-12 opacity-100' : 'max-h-0 opacity-0'}`}>
@@ -357,11 +579,11 @@ const Playlist: React.FC<PlaylistProps> = ({ onClose, isOpen, onImport }) => {
                             {selectedIds.size > 0 && (<button onClick={handleBatchDelete} className="text-xs font-bold text-red-500 bg-red-50 dark:bg-red-900/20 px-3 py-1.5 rounded-full flex items-center gap-1.5"><Trash2 size={12} /> Delete ({selectedIds.size})</button>)}
                     </div>
 
-                    {/* [优化 5] 在列表内部使用 AnimatePresence mode='wait'，确保切换歌单时旧的先走，新的再来，避免空白或重叠 */}
-                    <AnimatePresence mode="wait">
-                        <motion.div 
-                            ref={listContainerRef} 
-                            key={activePlaylistId} // 关键：Key 变化触发 exit 和 enter
+                    {/* Song List */}
+                    <AnimatePresence mode="popLayout">
+                        <motion.div
+                            ref={listContainerRef}
+                            key={activeTab}
                             variants={listVariants}
                             initial="hidden"
                             animate="visible"
@@ -374,16 +596,16 @@ const Playlist: React.FC<PlaylistProps> = ({ onClose, isOpen, onImport }) => {
                                     <span className="text-sm">Empty List</span>
                                 </div>
                             )}
-                            
+
                             {currentSongs.map((song, index) => (
-                                <SongRow 
+                                <SongRow
                                     key={song.id}
                                     song={song}
                                     index={index}
-                                    isActive={index === currentSongIndex}
+                                    isActive={!isHistoryTab && index === currentSongIndex}
                                     isEditing={isEditing}
                                     isSelected={selectedIds.has(song.id)}
-                                    onClick={() => handleRowClick(index)}
+                                    onClick={() => handleRowClick(index, song)}
                                     onToggleSelect={toggleSelect}
                                     onDelete={handleSingleDelete}
                                 />

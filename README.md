@@ -17,6 +17,20 @@ Zenith Player 是一款基于 React 19 生态构建的现代 Web 音乐播放器
 
 ---
 
+## 📑 目录
+
+- [✨ 核心特性](#-核心特性)
+- [🚀 快速开始](#-快速开始)
+- [🛠️ 自定义指南](#️-自定义指南)
+- [📂 项目结构概览](#-项目结构概览)
+- [🎮 手势控制](#-手势控制)
+- [📦 构建与部署](#-构建与部署)
+- [🔧 故障排除](#-故障排除)
+- [🤝 贡献指南](#-贡献指南)
+- [📄 许可证](#-许可证)
+
+---
+
 ## ✨ 核心特性
 
 | 🎨 **极致视觉** | 🎵 **音乐体验** | ⚡ **交互细节** |
@@ -32,7 +46,13 @@ Zenith Player 是一款基于 React 19 生态构建的现代 Web 音乐播放器
 只需简单几步,即可在本地运行 Zenith Player。
 
 ### 前置要求
-请确保您的环境已安装 [Node.js](https://nodejs.org/) (推荐 v18 或更高版本)。
+
+请确保您的环境已安装以下工具:
+
+| 工具 | 最低版本 | 推荐版本 |
+| :--- | :---: | :---: |
+| [Node.js](https://nodejs.org/) | v16.0 | v18+ |
+| npm / yarn / pnpm | npm 8+ | 最新版 |
 
 ### 1. 获取代码
 
@@ -76,25 +96,26 @@ Zenith Player 的代码结构清晰,非常适合进行个性化定制。
 
 ### 1. 修改默认歌单 (添加本地音乐)
 
-想要在初始化时加载您自己的音乐？请编辑 `src/constants.ts` 文件。
+想要在初始化时加载您自己的音乐？请编辑 `constants.ts` 文件。
 
 ```typescript
-// src/constants.ts
+// constants.ts
+import type { Song } from './types';
+
 export const SONGS: Song[] = [
   {
-    id: '1',
-    title: '您的歌曲标题',
-    artist: '歌手名',
-    // 封面图片 (支持本地路径或网络 URL)
-    coverUrl: 'https://example.com/cover.jpg',
-    // 音频文件地址
-    audioUrl: 'https://example.com/song.mp3',
-    // [可选] 歌词文件地址
-    lyricsUrl: 'https://example.com/lyrics.lrc'
+    id: '1',                                    // 唯一标识符
+    title: '您的歌曲标题',                        // 歌曲名称
+    artist: '歌手名',                            // 艺术家
+    coverUrl: 'https://example.com/cover.jpg',  // 封面图片 (支持本地路径或网络 URL)
+    audioUrl: 'https://example.com/song.mp3',   // 音频文件地址
+    lyricsUrl: 'https://example.com/lyrics.lrc' // [可选] 歌词文件地址
   },
   // ... 在此处添加更多歌曲对象
 ];
 ```
+
+> **💡 提示**: 支持的音频格式包括 MP3、WAV、OGG、FLAC 等主流格式。
 
 ### 2. 修改部署路径
 
@@ -102,30 +123,74 @@ export const SONGS: Song[] = [
 
 ```typescript
 // vite.config.ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
 export default defineConfig({
   base: '/',  // 将 '/player/' 修改为 '/'
+  plugins: [react()],
   // ... 其他配置保持不变
-})
+});
 ```
 
 ### 3. 修改主题色逻辑
 
-颜色提取逻辑位于 `src/App.tsx` 中,使用 `fast-average-color` 库自动提取封面颜色。如果您想固定某种主题色,可以直接修改 `themeColor` 变量。
+颜色提取逻辑位于 `src/App.tsx` 中,使用 `fast-average-color` 库自动提取封面颜色。如果您想固定某种主题色,可以直接修改 `themeColor` 变量:
+
+```typescript
+// src/App.tsx
+// 自动提取 (默认行为)
+const themeColor = extractedColor;
+
+// 或者固定主题色
+const themeColor = '#6366f1'; // Indigo 主题
+```
 
 ---
 
 ## 📂 项目结构概览
 
 ```
-src/
-├── api/            # 🌐 音乐平台 API (NetEase, QQ) 适配逻辑
-├── components/     # 🧩 UI 组件库 (播放控制、歌词、进度条、弹窗等)
-├── store/          # 📦 状态管理 (Zustand) - 处理播放状态、播放列表
-├── types/          # TS 类型定义
-├── utils/          # 🛠 工具函数 (震动反馈、网络请求代理)
-├── App.tsx         # 📱 应用主入口与布局
-└── constants.ts    # 🎵 静态数据与默认配置
+zenith-player/
+├── 📁 src/
+│   ├── 📁 api/              # 🌐 音乐平台 API 适配
+│   │   ├── netease.ts       #    网易云音乐 API
+│   │   └── qq.ts            #    QQ 音乐 API
+│   ├── 📁 components/       # 🧩 UI 组件库
+│   │   ├── Controls.tsx     #    播放控制按钮
+│   │   ├── Lyrics.tsx       #    歌词显示组件
+│   │   ├── ProgressBar.tsx  #    进度条组件
+│   │   ├── Visualizer.tsx   #    音频可视化
+│   │   ├── HandDetector.tsx #    手势识别组件
+│   │   └── ...              #    更多组件
+│   ├── 📁 store/            # 📦 状态管理 (Zustand)
+│   │   └── usePlayerStore.ts
+│   ├── App.tsx              # 📱 应用主入口
+│   └── ...
+├── constants.ts             # 🎵 默认歌单配置
+├── types.ts                 # 📝 TypeScript 类型定义
+├── utils.ts                 # 🛠 工具函数
+├── vite.config.ts           # ⚙️ Vite 构建配置
+└── package.json             # 📦 项目依赖
 ```
+
+---
+
+## 🎮 手势控制
+
+Zenith Player 支持基于摄像头的手势控制功能,让您无需触碰设备即可操控播放器。
+
+### 支持的手势
+
+| 手势 | 动作 | 说明 |
+| :---: | :--- | :--- |
+| ✋ 张开手掌 | 暂停/播放 | 手掌面向摄像头 |
+| 👈 向左滑动 | 上一首 | 快速向左挥手 |
+| 👉 向右滑动 | 下一首 | 快速向右挥手 |
+| 👆 向上滑动 | 增加音量 | 快速向上挥手 |
+| 👇 向下滑动 | 减少音量 | 快速向下挥手 |
+
+> **⚠️ 注意**: 手势控制需要浏览器授权摄像头权限,且需要良好的光线条件。
 
 ---
 
@@ -134,19 +199,95 @@ src/
 当您准备好发布时,运行以下命令构建生产环境版本:
 
 ```bash
+# 构建生产版本
 npm run build
+
+# 预览构建结果
+npm run preview
 ```
 
-构建完成后,`dist` 目录下的文件即为最终产物。您可以将其部署到 GitHub Pages、Vercel、Netlify 或任何静态 Web 服务器上。
+构建完成后,`dist` 目录下的文件即为最终产物。
+
+### 部署选项
+
+| 平台 | 说明 |
+| :--- | :--- |
+| **GitHub Pages** | 免费托管,适合个人项目 |
+| **Vercel** | 零配置部署,自动 CI/CD |
+| **Netlify** | 强大的边缘网络,支持表单 |
+| **自托管** | 任何支持静态文件的 Web 服务器 |
+
+---
+
+## 🔧 故障排除
+
+### 常见问题
+
+<details>
+<summary><strong>Q: 音频无法播放？</strong></summary>
+
+**A:** 请检查以下几点:
+1. 确保音频 URL 可访问且支持跨域 (CORS)
+2. 检查浏览器是否阻止了自动播放
+3. 确认音频格式被浏览器支持
+
+</details>
+
+<details>
+<summary><strong>Q: 歌词不显示？</strong></summary>
+
+**A:** 请确保:
+1. `lyricsUrl` 指向有效的 LRC 文件
+2. LRC 文件格式正确 (时间标签格式: `[mm:ss.xx]`)
+3. 网络请求没有被 CORS 策略阻止
+
+</details>
+
+<details>
+<summary><strong>Q: 手势控制不工作？</strong></summary>
+
+**A:** 请检查:
+1. 浏览器是否已授权摄像头权限
+2. 光线是否充足
+3. 手势是否在摄像头可视范围内
+
+</details>
+
+---
+
+## 🤝 贡献指南
+
+我们欢迎任何形式的贡献！
+
+1. **Fork** 本仓库
+2. 创建您的特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交您的更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启一个 **Pull Request**
+
+### 开发规范
+
+- 使用 TypeScript 进行类型安全开发
+- 遵循 ESLint 代码规范
+- 组件使用函数式组件 + Hooks
+- 提交信息遵循 [Conventional Commits](https://www.conventionalcommits.org/)
 
 ---
 
 ## 📄 许可证
 
-本项目基于 **MIT License** 开源。
+本项目基于 **MIT License** 开源 - 查看 [LICENSE](LICENSE) 文件了解详情。
 
 ---
 
 <div align="center">
+
+**[⬆ 返回顶部](#-zenith-player)**
+
 <sub>Designed & Developed with ❤️ by Zenith Team</sub>
+
+<br/>
+
+如果这个项目对您有帮助,请考虑给它一个 ⭐️
+
 </div>

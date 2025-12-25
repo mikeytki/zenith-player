@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, memo } from 'react';
 
 interface VisualizerProps {
   isPlaying: boolean;
@@ -40,10 +40,10 @@ const Visualizer: React.FC<VisualizerProps> = ({ isPlaying, analyser, mode = 'no
     const dataArray = new Uint8Array(bufferLength);
 
     // 2. 视觉参数
-    const BAR_COUNT = mode === 'fullscreen' ? 120 : 50; 
+    const BAR_COUNT = mode === 'fullscreen' ? 120 : 50;
     const BAR_WIDTH = (rect.width / BAR_COUNT) * 0.5;
     const GAP = (rect.width / BAR_COUNT) * 0.5;
-    
+
     // 辅助函数：生成带透明度的颜色
     const getColor = (alpha: number) => `hsla(${hslValues.h}, ${hslValues.s}, ${hslValues.l}, ${alpha})`;
 
@@ -62,7 +62,7 @@ const Visualizer: React.FC<VisualizerProps> = ({ isPlaying, analyser, mode = 'no
       ctx.globalAlpha = 1;
 
       const centerX = rect.width / 2;
-      
+
       // 双向对称绘制
       for (let i = 0; i < BAR_COUNT / 2; i++) {
         // 只取前 75% 的频率数据
@@ -70,33 +70,33 @@ const Visualizer: React.FC<VisualizerProps> = ({ isPlaying, analyser, mode = 'no
         let value = dataArray[dataIndex] || 0;
 
         value = value > 0 ? value * 1.1 : 0;
-        
+
         const percent = Math.min(1, value / 255);
         const maxBarHeight = rect.height * (mode === 'fullscreen' ? 0.5 : 0.85);
         const barHeight = Math.pow(percent, 1.4) * maxBarHeight;
-        
+
         // 动态透明度
         const alpha = 0.15 + (percent * 0.85);
 
         // [修改] 使用主题色创建渐变
         const gradient = ctx.createLinearGradient(0, rect.height/2 - barHeight/2, 0, rect.height/2 + barHeight/2);
-        
+
         // 渐变策略：两头完全透明，中间根据音量实心，边缘半透明发光
         gradient.addColorStop(0, getColor(0));
         gradient.addColorStop(0.3, getColor(alpha * 0.6));
         gradient.addColorStop(0.5, getColor(alpha));
         gradient.addColorStop(0.7, getColor(alpha * 0.6));
         gradient.addColorStop(1, getColor(0));
-        
+
         ctx.fillStyle = gradient;
 
         // 绘制圆角柱状体
-        const radius = BAR_WIDTH; 
-        
+        const radius = BAR_WIDTH;
+
         // 左侧
         const xLeft = centerX - (i * (BAR_WIDTH + GAP)) - GAP;
         const y = (rect.height - barHeight) / 2;
-        
+
         ctx.beginPath();
         if (ctx.roundRect) ctx.roundRect(xLeft, y, BAR_WIDTH, barHeight, radius);
         else ctx.rect(xLeft, y, BAR_WIDTH, barHeight);
@@ -104,7 +104,7 @@ const Visualizer: React.FC<VisualizerProps> = ({ isPlaying, analyser, mode = 'no
 
         // 右侧
         const xRight = centerX + (i * (BAR_WIDTH + GAP)) + GAP;
-        
+
         ctx.beginPath();
         if (ctx.roundRect) ctx.roundRect(xRight, y, BAR_WIDTH, barHeight, radius);
         else ctx.rect(xRight, y, BAR_WIDTH, barHeight);
@@ -120,4 +120,4 @@ const Visualizer: React.FC<VisualizerProps> = ({ isPlaying, analyser, mode = 'no
   return <canvas ref={canvasRef} className="w-full h-full" />;
 };
 
-export default Visualizer;
+export default memo(Visualizer);

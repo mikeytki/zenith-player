@@ -5,18 +5,20 @@ import { Song, RepeatMode } from '../types'; // [修改] 引入 RepeatMode
 import ProgressBar from './components/ProgressBar';
 import Controls from './components/Controls';
 import Visualizer from './components/Visualizer';
-import Playlist from './components/Playlist';
+import PlaylistSidebar from './components/PlaylistSidebar';
 import Lyrics from './components/Lyrics';
 import Toast from './components/Toast';
 import ImportModal from './components/ImportModal';
 import SearchModal from './components/SearchModal'; 
-import { Moon, Sun, Search, Maximize2, Minimize2, PictureInPicture2, Monitor, AlignJustify, ChevronDown, Expand, LayoutDashboard} from 'lucide-react'; 
+import { Moon, Sun, Search, Maximize2, Minimize2, PictureInPicture2, Monitor, AlignJustify, ChevronDown, Expand, LayoutDashboard, Hand, MousePointer2, AlertCircle} from 'lucide-react'; 
 import { FastAverageColor } from 'fast-average-color'; 
 import { useShallow } from 'zustand/react/shallow';
 import { usePlayerStore } from './store/usePlayerStore'; 
 import { fetchNeteasePlaylist, getNeteaseAudioUrl, fetchLyricsById as fetchNeteaseLyrics, fetchPlaylistDetail, searchAndMatchLyrics } from './api/netease';
 import { fetchQQPlaylist, getQQAudioUrl, parseQQPlaylistId, fetchQQLyricsById } from './api/qq';
 import { motion, AnimatePresence } from 'framer-motion'; 
+import HandDetector from './components/HandDetector'; // 引入刚才创建的组件
+import GestureFeedback from './components/GestureFeedback'; // 手势视觉反馈
 
 const fac = new FastAverageColor();
 
@@ -37,13 +39,21 @@ function getAccessibleColor(hex: string, isDarkMode: boolean) {
 }
 
 const App: React.FC = () => {
-  const { 
+  const {
     isPlaying, volume, isDarkMode, viewMode, focusLayout, repeatMode, // [修改] 获取 repeatMode
     togglePlay, toggleDarkMode,
     getCurrentSong,
     addPlaylist, nextSong, prevSong, pause, updateSongLyric,
     playSearchSong,
-    setViewMode, toggleFocusLayout
+    setViewMode, toggleFocusLayout,
+    // === 新增：获取交互状态 ===
+    inputMode,
+    setInputMode,
+    cameraPermission,
+    currentGesture, // 用于调试显示
+    cursorPosition,  // 用于调试显示
+    // === 播放历史 ===
+    addToPlayHistory
   } = usePlayerStore(useShallow(state => ({
       isPlaying: state.isPlaying,
       volume: state.volume,
@@ -61,7 +71,13 @@ const App: React.FC = () => {
       updateSongLyric: state.updateSongLyric,
       playSearchSong: state.playSearchSong,
       setViewMode: state.setViewMode,
-      toggleFocusLayout: state.toggleFocusLayout
+      toggleFocusLayout: state.toggleFocusLayout,
+      inputMode: state.inputMode,
+      setInputMode: state.setInputMode,
+      cameraPermission: state.cameraPermission,
+      currentGesture: state.currentGesture,
+      cursorPosition: state.cursorPosition,
+      addToPlayHistory: state.addToPlayHistory
   })));
 
   const currentSong = getCurrentSong();
@@ -69,7 +85,7 @@ const App: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [rawCoverColor, setRawCoverColor] = useState<string>('#525252');
-  const [showPlaylist, setShowPlaylist] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false); 
   const [toastMessage, setToastMessage] = useState('');
@@ -171,6 +187,13 @@ const App: React.FC = () => {
     if (isPlaying && audioContextRef.current?.state === 'suspended') { audioContextRef.current.resume(); }
   }, [isPlaying]);
 
+  // 记录播放历史：当歌曲开始播放时添加到历史
+  useEffect(() => {
+    if (isPlaying && currentSong) {
+      addToPlayHistory(currentSong);
+    }
+  }, [currentSong?.id, isPlaying]);
+
   const handleFullScreenToggle = async () => {
       if (!document.fullscreenElement) {
           try { await document.documentElement.requestFullscreen(); setViewMode('focus'); } catch(e) { console.warn(e); }
@@ -266,9 +289,9 @@ const App: React.FC = () => {
               newSongs = neteaseTracks.map(track => ({ id: track.id, title: track.title, artist: track.artist, coverUrl: track.coverUrl || details?.cover || NETEASE_COVER, duration: (track.duration || 0) / 1000, audioUrl: getNeteaseAudioUrl(track.id), }));
           }
           const newPlaylistId = `${platform.toLowerCase()}-${qqId || neteaseId}-${Date.now()}`;
-          addPlaylist({ id: newPlaylistId, name: playlistName, songs: newSongs }); 
+          addPlaylist({ id: newPlaylistId, name: playlistName, songs: newSongs });
           showToastMsg(`Imported "${playlistName}"`);
-          setShowPlaylist(true);
+          setSidebarCollapsed(false); // 展开侧边栏显示新导入的歌单
       } catch (error) { console.error(error); showToastMsg('Failed to import playlist'); }
   };
   const handlePlayFromSearch = (song: Song) => { showToastMsg(`Playing "${song.title}"`); playSearchSong(song); setShowSearchModal(false); };
@@ -290,14 +313,28 @@ const App: React.FC = () => {
 
   if (!currentSong) return ( <div className={`${isDarkMode ? 'dark' : ''} w-full h-screen bg-stone-50 dark:bg-neutral-950 flex flex-col items-center justify-center gap-4 text-neutral-400`}> <p>No songs available</p> <button onClick={() => setShowSearchModal(true)} className="px-4 py-2 bg-neutral-200 dark:bg-neutral-800 rounded-full text-sm">Search Music</button> <SearchModal isOpen={showSearchModal} onClose={() => setShowSearchModal(false)} onPlay={handlePlayFromSearch} /> </div> );
 
-  const transition = { type: "spring" as const, stiffness: 280, damping: 30 };
+  const transition = { type: "spring" as const, stiffness: 300, damping: 35, mass: 0.8 };
 
   return (
-    <div className={`${isDarkMode ? 'dark' : ''} w-full h-screen overflow-hidden bg-stone-50 dark:bg-neutral-950 transition-colors duration-500`} style={{ '--theme-color': themeColor } as React.CSSProperties}>
+    <div className={`${isDarkMode ? 'dark' : ''} w-full h-screen overflow-hidden bg-stone-50 dark:bg-neutral-950 transition-colors duration-500 flex`} style={{ '--theme-color': themeColor } as React.CSSProperties}>
       <Toast message={toastMessage} isVisible={showToast} onClose={() => setShowToast(false)} />
-      <Playlist isOpen={showPlaylist} onClose={() => setShowPlaylist(false)} onImport={() => setShowImportModal(true)} />
       <ImportModal isOpen={showImportModal} onClose={() => setShowImportModal(false)} onImport={handleImportPlaylist} />
       <SearchModal isOpen={showSearchModal} onClose={() => setShowSearchModal(false)} onPlay={handlePlayFromSearch} />
+
+      {/* Playlist Sidebar - Show in default and focus modes */}
+      {(viewMode === 'default' || viewMode === 'focus') && (
+        <div className={`relative h-full flex-shrink-0 ${viewMode === 'focus' ? 'absolute left-0 top-0 z-40' : 'z-30'}`}>
+          <PlaylistSidebar
+            onImport={() => setShowImportModal(true)}
+            isCollapsed={sidebarCollapsed}
+            onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+            isFocusMode={viewMode === 'focus'}
+          />
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      <div className="flex-1 relative h-full overflow-hidden">
 
       <audio
         ref={audioRef}
@@ -310,18 +347,17 @@ const App: React.FC = () => {
       />
 
       {/* 主界面背景 - 在 Mini 模式下依然保留背景 */}
-      <motion.div 
+      <div
         className="absolute inset-0 z-0 will-change-transform transform-gpu"
-        // Mini 模式下不隐藏背景，只是主内容不渲染
-        animate={{ opacity: isDarkMode ? 1 : 0.6 }}
-        transition={{ duration: 0.5 }}
-        style={{ 
-            backgroundImage: `url(${currentSong.coverUrl})`, 
-            backgroundSize: 'cover', 
-            backgroundPosition: 'center', 
-            filter: isDarkMode ? 'blur(30px) saturate(1.2) brightness(0.4)' : 'blur(30px) saturate(1.5) brightness(1.1)', 
+        style={{
+            backgroundImage: `url(${currentSong.coverUrl})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            filter: isDarkMode ? 'blur(30px) saturate(1.2) brightness(0.4)' : 'blur(30px) saturate(1.5) brightness(1.1)',
             transform: 'scale(1.1) translateZ(0)',
-        }} 
+            opacity: isDarkMode ? 1 : 0.6,
+            transition: 'opacity 0.5s ease-out'
+        }}
       />
       <div className={`absolute inset-0 z-0 pointer-events-none transition-colors duration-500 ${isDarkMode ? 'bg-black/50' : 'bg-white/30'}`} />
 
@@ -334,6 +370,16 @@ const App: React.FC = () => {
                 exit={{ opacity: 0, y: -20 }}
                 className="absolute top-6 right-8 z-[60] flex items-center gap-3"
             >
+                {/* === 新增：交互模式切换按钮 === */}
+                <button 
+                    aria-label="Toggle Input Mode" 
+                    title={inputMode === 'MOUSE' ? "Switch to Hand Gesture" : "Switch to Mouse"} 
+                    onClick={() => setInputMode(inputMode === 'MOUSE' ? 'HAND' : 'MOUSE')} 
+                    className={`${BUTTON_CLASS} ${inputMode === 'HAND' ? 'bg-indigo-500/20 text-indigo-500 border-indigo-500/30' : ''}`}
+                >
+                    {inputMode === 'MOUSE' ? <MousePointer2 size={20} strokeWidth={2} /> : <Hand size={20} strokeWidth={2} />}
+                </button>
+                {/* ... 原有的 Search, Theme 等按钮保持不变 ... */}
                 <button aria-label="Search" title="Search" onClick={() => setShowSearchModal(true)} className={BUTTON_CLASS}><Search size={20} strokeWidth={2} /></button>
                 <button aria-label="Toggle Theme" title="Toggle Theme" onClick={toggleDarkMode} className={BUTTON_CLASS}>{isDarkMode ? <Sun size={20} strokeWidth={2} /> : <Moon size={20} strokeWidth={2} />}</button>
                 
@@ -354,6 +400,38 @@ const App: React.FC = () => {
             </motion.div>
         )}
       </AnimatePresence>
+        {/* === 新增：挂载 HandDetector 组件 (无 UI，后台运行) === */}
+        <HandDetector />
+
+        {/* === 新增：手势视觉反馈 === */}
+        <GestureFeedback />
+
+        {/* === 新增：手势调试面板 (仅在 HAND 模式显示) === */}
+      {/* 这只是为了开发阶段验证 MediaPipe 是否工作，后期发布时可以删除 */}
+      {inputMode === 'HAND' && (
+        <div className="absolute top-6 left-6 z-[60] p-4 bg-black/80 backdrop-blur-md rounded-2xl border border-white/10 text-white text-xs font-mono space-y-2 pointer-events-none">
+            <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/10">
+                <div className={`w-2 h-2 rounded-full ${cameraPermission === true ? 'bg-green-500 animate-pulse' : cameraPermission === false ? 'bg-red-500' : 'bg-yellow-500'}`} />
+                <span className="font-bold uppercase tracking-wider">System Status</span>
+            </div>
+            
+            {cameraPermission === false && (
+                <div className="text-red-400 flex items-center gap-1">
+                    <AlertCircle size={12} /> Camera Denied
+                </div>
+            )}
+
+            <div>Gesture: <span className="text-indigo-400 font-bold text-sm">{currentGesture}</span></div>
+            <div>Cursor X: <span className="text-neutral-400">{cursorPosition.x.toFixed(3)}</span></div>
+            <div>Cursor Y: <span className="text-neutral-400">{cursorPosition.y.toFixed(3)}</span></div>
+            
+            {/* 简易可视化光标位置 (X/Y 轴翻转后的 WebGL 坐标) */}
+            <div className="w-full h-1 bg-neutral-700 rounded-full overflow-hidden mt-1">
+                 {/* 将 -1~1 映射回 0~100% 显示 */}
+                 <div className="h-full bg-indigo-500" style={{ width: `${((cursorPosition.x + 1) / 2) * 100}%` }} />
+            </div>
+        </div>
+      )}
 
       <div className="relative z-10 w-full h-full flex items-center justify-center font-sans text-neutral-900 dark:text-neutral-50 pointer-events-none">
         <AnimatePresence mode='wait'> 
@@ -389,9 +467,9 @@ const App: React.FC = () => {
                         </div>
                         <ProgressBar currentTime={currentTime} duration={duration} onSeek={(t) => { if(audioRef.current) { audioRef.current.currentTime = t; setCurrentTime(t); }}} />
                         {/* [修改] 传递 showToastMsg 给 Controls */}
-                        <Controls 
-                            onTogglePlaylist={() => setShowPlaylist(true)} 
-                            onImport={() => setShowImportModal(true)} 
+                        <Controls
+                            onTogglePlaylist={() => setSidebarCollapsed(!sidebarCollapsed)}
+                            onImport={() => setShowImportModal(true)}
                             onToast={showToastMsg} // [新增]
                         />
                     </div>
@@ -443,9 +521,9 @@ const App: React.FC = () => {
                            <ProgressBar currentTime={currentTime} duration={duration} onSeek={(t) => { if(audioRef.current) { audioRef.current.currentTime = t; setCurrentTime(t); }}} />
                            <div className="flex justify-center mt-4">
                                {/* [修改] 传递 showToastMsg 给 Controls */}
-                               <Controls 
-                                   onTogglePlaylist={() => setShowPlaylist(true)} 
-                                   onImport={() => setShowImportModal(true)} 
+                               <Controls
+                                   onTogglePlaylist={() => setSidebarCollapsed(!sidebarCollapsed)}
+                                   onImport={() => setShowImportModal(true)}
                                    onToast={showToastMsg} // [新增]
                                />
                            </div>
@@ -479,9 +557,9 @@ const App: React.FC = () => {
                              <ProgressBar currentTime={currentTime} duration={duration} onSeek={(t) => { if(audioRef.current) { audioRef.current.currentTime = t; setCurrentTime(t); }}} />
                              <div className="flex justify-center mt-4">
                                  {/* [修改] 传递 showToastMsg 给 Controls */}
-                                 <Controls 
-                                     onTogglePlaylist={() => setShowPlaylist(true)} 
-                                     onImport={() => setShowImportModal(true)} 
+                                 <Controls
+                                     onTogglePlaylist={() => setSidebarCollapsed(!sidebarCollapsed)}
+                                     onImport={() => setShowImportModal(true)}
                                      onToast={showToastMsg} // [新增]
                                  />
                              </div>
@@ -561,6 +639,7 @@ const App: React.FC = () => {
 
         </AnimatePresence>
       </div>
+      </div> {/* End Main Content Area */}
     </div>
   );
 };

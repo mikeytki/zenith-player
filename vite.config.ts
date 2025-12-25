@@ -4,11 +4,23 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig({
-  base: '/',  // <--- [关键修改] 改为 '/'，否则部署后会出现白屏或资源 404
+  base: '/player/',
   plugins: [react()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // 将大型依赖分离成独立 chunk
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-motion': ['framer-motion'],
+          'vendor-mediapipe': ['@mediapipe/tasks-vision'],
+        },
+      },
     },
   },
 })

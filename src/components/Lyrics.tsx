@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, memo } from 'react';
 
 interface LyricLine {
   startTime: number;
@@ -254,4 +254,4 @@ const Lyrics: React.FC<LyricsProps> = ({ lyricsUrl, lyricsContent, tLyricsConten
   );
 };
 
-export default Lyrics;
+export default memo(Lyrics);

@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.22-rc.20250304",
     "fast-average-color": "^9.5.0",
     "framer-motion": "^12.23.26",
     "immer": "^11.0.1",
