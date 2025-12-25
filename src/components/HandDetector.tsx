@@ -6,11 +6,22 @@ import { useShallow } from 'zustand/react/shallow';
 // 平滑系数
 const LERP_FACTOR = 0.15;
 // 动作冷却时间 (毫秒)，防止误触连点
-const ACTION_COOLDOWN = 1000;
-// 捏合检测阈值
-const PINCH_THRESHOLD = 0.07;
+const ACTION_COOLDOWN = 800;
 // 手势确认帧数 - 需要连续检测到相同手势才触发
-const GESTURE_CONFIRM_FRAMES = 5; // 降低到5帧，更快响应 
+const GESTURE_CONFIRM_FRAMES = 3;
+// 置信度阈值
+const CONFIDENCE_THRESHOLD = 0.5;
+
+// 滑动检测参数
+const SWIPE_THRESHOLD = 0.15; // 滑动距离阈值（归一化坐标）
+const SWIPE_TIME_WINDOW = 500; // 滑动时间窗口（毫秒）
+const POSITION_HISTORY_SIZE = 10; // 位置历史记录数量
+
+interface PositionRecord {
+  x: number;
+  y: number;
+  timestamp: number;
+}
 
 const HandDetector: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -30,69 +41,131 @@ const HandDetector: React.FC = () => {
     setInputMode: state.setInputMode,
   })));
 
-  // 2. [新增] 获取播放控制动作 (用于执行逻辑)
+  // 2. 获取播放控制动作 (用于执行逻辑)
   const {
-    currentGesture, // 监听当前手势
     play,
     pause,
-    nextSong
+    nextSong,
+    prevSong,
+    increaseVolume,
+    decreaseVolume
   } = usePlayerStore(useShallow(state => ({
-    currentGesture: state.currentGesture,
     play: state.play,
     pause: state.pause,
-    nextSong: state.nextSong
+    nextSong: state.nextSong,
+    prevSong: state.prevSong,
+    increaseVolume: state.increaseVolume,
+    decreaseVolume: state.decreaseVolume
   })));
 
   // Refs
   const lastCursorRef = useRef({ x: 0, y: 0 });
   const recognizerRef = useRef<GestureRecognizer | null>(null);
   const requestRef = useRef<number | null>(null);
-  const lastActionTimeRef = useRef<number>(0); // 动作冷却计时器
+  const lastActionTimeRef = useRef<number>(0);
 
   // 手势确认机制
   const gestureHistoryRef = useRef<GestureType[]>([]);
   const confirmedGestureRef = useRef<GestureType>('NONE');
 
+  // 滑动检测：位置历史记录
+  const positionHistoryRef = useRef<PositionRecord[]>([]);
+  const lastSwipeTimeRef = useRef<number>(0);
+
   const [isModelLoaded, setIsModelLoaded] = useState(false);
 
-  // === 核心逻辑：监听手势变化并执行命令 ===
-  useEffect(() => {
+  // 检测滑动手势
+  const detectSwipe = (currentX: number, currentY: number): GestureType => {
+    const now = Date.now();
+    
+    // 添加当前位置到历史
+    positionHistoryRef.current.push({ x: currentX, y: currentY, timestamp: now });
+    
+    // 保持历史记录在限定大小内
+    if (positionHistoryRef.current.length > POSITION_HISTORY_SIZE) {
+      positionHistoryRef.current.shift();
+    }
+    
+    // 需要足够的历史记录才能检测滑动
+    if (positionHistoryRef.current.length < 3) {
+      return 'NONE';
+    }
+    
+    // 检查冷却时间
+    if (now - lastSwipeTimeRef.current < ACTION_COOLDOWN) {
+      return 'NONE';
+    }
+    
+    // 获取时间窗口内的起始位置
+    const windowStart = now - SWIPE_TIME_WINDOW;
+    const startRecord = positionHistoryRef.current.find(r => r.timestamp >= windowStart);
+    
+    if (!startRecord) {
+      return 'NONE';
+    }
+    
+    const deltaX = currentX - startRecord.x;
+    const deltaY = currentY - startRecord.y;
+    const absDeltaX = Math.abs(deltaX);
+    const absDeltaY = Math.abs(deltaY);
+    
+    // 判断是水平滑动还是垂直滑动
+    if (absDeltaX > SWIPE_THRESHOLD && absDeltaX > absDeltaY * 1.5) {
+      // 水平滑动（注意：摄像头是镜像的，所以方向相反）
+      lastSwipeTimeRef.current = now;
+      positionHistoryRef.current = []; // 清空历史，防止连续触发
+      return deltaX > 0 ? 'SWIPE_LEFT' : 'SWIPE_RIGHT'; // 镜像反转
+    } else if (absDeltaY > SWIPE_THRESHOLD && absDeltaY > absDeltaX * 1.5) {
+      // 垂直滑动
+      lastSwipeTimeRef.current = now;
+      positionHistoryRef.current = [];
+      return deltaY > 0 ? 'SWIPE_DOWN' : 'SWIPE_UP';
+    }
+    
+    return 'NONE';
+  };
+
+  // === 核心逻辑：执行手势命令 ===
+  const executeGestureAction = (gesture: GestureType) => {
     if (inputMode !== 'HAND') return;
 
     const now = Date.now();
     // 检查冷却时间
     if (now - lastActionTimeRef.current < ACTION_COOLDOWN) return;
 
-    // 只响应已确认的手势
-    const gesture = confirmedGestureRef.current;
-
-    if (gesture === 'PINCH') {
-        console.log("👌 Gesture Trigger: NEXT SONG");
-        nextSong();
-        lastActionTimeRef.current = now;
-        confirmedGestureRef.current = 'NONE';
-        gestureHistoryRef.current = []; // 清空历史
-    }
-    else if (gesture === 'OPEN') {
-        // 张开手掌 = 播放（无论当前状态）
-        console.log("🖐️ Gesture Trigger: PLAY");
-        play();
-        lastActionTimeRef.current = now;
-        confirmedGestureRef.current = 'NONE';
-        gestureHistoryRef.current = [];
+    if (gesture === 'OPEN') {
+      console.log("🖐️ Gesture Trigger: PLAY");
+      play();
+      lastActionTimeRef.current = now;
     }
     else if (gesture === 'FIST') {
-        // 握拳 = 暂停（无论当前状态）
-        console.log("✊ Gesture Trigger: PAUSE");
-        pause();
-        lastActionTimeRef.current = now;
-        confirmedGestureRef.current = 'NONE';
-        gestureHistoryRef.current = [];
+      console.log("✊ Gesture Trigger: PAUSE");
+      pause();
+      lastActionTimeRef.current = now;
     }
-  }, [currentGesture, inputMode, nextSong, play, pause]);
+    else if (gesture === 'SWIPE_LEFT') {
+      console.log("👈 Gesture Trigger: PREV SONG");
+      prevSong(0);
+      lastActionTimeRef.current = now;
+    }
+    else if (gesture === 'SWIPE_RIGHT') {
+      console.log("👉 Gesture Trigger: NEXT SONG");
+      nextSong();
+      lastActionTimeRef.current = now;
+    }
+    else if (gesture === 'SWIPE_UP') {
+      console.log("👆 Gesture Trigger: VOLUME UP");
+      increaseVolume(0.15);
+      lastActionTimeRef.current = now;
+    }
+    else if (gesture === 'SWIPE_DOWN') {
+      console.log("👇 Gesture Trigger: VOLUME DOWN");
+      decreaseVolume(0.15);
+      lastActionTimeRef.current = now;
+    }
+  };
 
-  // === 以下为 MediaPipe 初始化与循环逻辑 (保持不变) ===
-
+  // === MediaPipe 初始化 ===
   useEffect(() => {
     const initModel = async () => {
       try {
@@ -163,50 +236,74 @@ const HandDetector: React.FC = () => {
     if (videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
         const results = recognizerRef.current.recognizeForVideo(videoRef.current, nowInMs);
 
-        if (results.gestures.length > 0) {
-          const mediapipeGesture = results.gestures[0][0].categoryName;
-          const confidence = results.gestures[0][0].score;
+        if (results.landmarks && results.landmarks.length > 0) {
           const landmarks = results.landmarks[0];
+          const mediapipeGesture = results.gestures.length > 0 ? results.gestures[0][0].categoryName : '';
+          const confidence = results.gestures.length > 0 ? results.gestures[0][0].score : 0;
 
-          // 获取手指位置（用于光标）
-          const thumbTip = landmarks[4];
+          // 获取手掌中心位置（用于滑动检测）
+          // 使用手腕(0)和中指根部(9)的中点作为手掌中心
+          const wrist = landmarks[0];
+          const middleBase = landmarks[9];
+          const palmCenterX = (wrist.x + middleBase.x) / 2;
+          const palmCenterY = (wrist.y + middleBase.y) / 2;
+
+          // 获取食指位置（用于光标）
           const indexTip = landmarks[8];
 
           let myGesture: GestureType = 'NONE';
 
-          // 只接受高置信度的手势 (>0.6)
-          if (confidence > 0.6) {
-            const distance = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
-
-            if (distance < PINCH_THRESHOLD) {
-              myGesture = 'PINCH';
-            } else {
-              // 如果不是捏合，再检测其他手势
-              if (mediapipeGesture === 'Open_Palm') myGesture = 'OPEN';
-              else if (mediapipeGesture === 'Closed_Fist') myGesture = 'FIST';
-              else if (mediapipeGesture === 'Victory') myGesture = 'POINT';
+          // 首先检测滑动手势（优先级最高）
+          const swipeGesture = detectSwipe(palmCenterX, palmCenterY);
+          if (swipeGesture !== 'NONE') {
+            myGesture = swipeGesture;
+            // 滑动手势立即执行
+            setGesture(myGesture);
+            executeGestureAction(myGesture);
+            // 重置静态手势历史
+            gestureHistoryRef.current = [];
+            confirmedGestureRef.current = 'NONE';
+          } else if (confidence > CONFIDENCE_THRESHOLD) {
+            // 只有高置信度时才检测静态手势
+            if (mediapipeGesture === 'Open_Palm') {
+              myGesture = 'OPEN';
+            } else if (mediapipeGesture === 'Closed_Fist') {
+              myGesture = 'FIST';
+            } else if (mediapipeGesture === 'Victory' || mediapipeGesture === 'Pointing_Up') {
+              myGesture = 'POINT';
             }
-          }
 
-          // 手势确认机制：需要连续多帧检测到相同手势
-          gestureHistoryRef.current.push(myGesture);
-          if (gestureHistoryRef.current.length > GESTURE_CONFIRM_FRAMES) {
-            gestureHistoryRef.current.shift();
-          }
-
-          // 检查最近的帧是否都是同一个手势
-          if (gestureHistoryRef.current.length === GESTURE_CONFIRM_FRAMES) {
-            const allSame = gestureHistoryRef.current.every(g => g === myGesture);
-            if (allSame && myGesture !== 'NONE' && myGesture !== 'POINT') {
-              // 只有当确认手势与当前不同时才更新
-              if (confirmedGestureRef.current !== myGesture) {
-                confirmedGestureRef.current = myGesture;
-                setGesture(myGesture);
+            // 静态手势确认机制：需要连续多帧检测到相同手势
+            if (myGesture !== 'NONE' && myGesture !== 'POINT') {
+              gestureHistoryRef.current.push(myGesture);
+              if (gestureHistoryRef.current.length > GESTURE_CONFIRM_FRAMES) {
+                gestureHistoryRef.current.shift();
               }
-            } else if (myGesture === 'NONE' || myGesture === 'POINT') {
-              // NONE 和 POINT 立即更新（用于光标控制）
+
+              // 检查最近的帧是否都是同一个手势
+              if (gestureHistoryRef.current.length === GESTURE_CONFIRM_FRAMES) {
+                const allSame = gestureHistoryRef.current.every(g => g === myGesture);
+                if (allSame && confirmedGestureRef.current !== myGesture) {
+                  confirmedGestureRef.current = myGesture;
+                  setGesture(myGesture);
+                  // 直接执行动作
+                  executeGestureAction(myGesture);
+                  // 执行后重置，防止重复触发
+                  gestureHistoryRef.current = [];
+                  confirmedGestureRef.current = 'NONE';
+                }
+              }
+            } else if (myGesture === 'POINT') {
+              // POINT 立即更新（用于光标控制）
               setGesture(myGesture);
+            } else {
+              // NONE 时不立即清空历史，保持一定容错
+              // 只更新显示状态
+              setGesture('NONE');
             }
+          } else {
+            // 低置信度时不清空历史，保持容错性
+            // 这样即使中间有几帧置信度低，也不会打断手势确认
           }
 
           // 更新光标位置
@@ -225,6 +322,7 @@ const HandDetector: React.FC = () => {
           setGesture('NONE');
           gestureHistoryRef.current = [];
           confirmedGestureRef.current = 'NONE';
+          // 不清空位置历史，保持滑动检测的连续性
         }
     }
 

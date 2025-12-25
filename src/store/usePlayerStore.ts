@@ -4,8 +4,8 @@ import { immer } from 'zustand/middleware/immer';
 import { Song, PlaylistData, RepeatMode, ViewMode, FocusLayout } from '../../types';
 import { SONGS as INITIAL_SONGS } from '../../constants';
 
-// --- 新增：手势与交互类型定义 ---
-export type GestureType = 'OPEN' | 'FIST' | 'PINCH' | 'POINT' | 'NONE';
+// --- 手势与交互类型定义 ---
+export type GestureType = 'OPEN' | 'FIST' | 'PINCH' | 'POINT' | 'SWIPE_LEFT' | 'SWIPE_RIGHT' | 'SWIPE_UP' | 'SWIPE_DOWN' | 'NONE';
 export type InputMode = 'MOUSE' | 'HAND';
 
 // 播放历史记录项
@@ -53,9 +53,11 @@ interface PlayerState {
   pause: () => void;
   togglePlay: () => void;
   setVolume: (val: number) => void;
+  increaseVolume: (amount?: number) => void;
+  decreaseVolume: (amount?: number) => void;
   
   nextSong: () => void;
-  prevSong: (currentTime: number) => void;
+  prevSong: (currentTime?: number) => void;
   selectSong: (index: number) => void;
   
   toggleShuffle: () => void;
@@ -159,6 +161,16 @@ export const usePlayerStore = create<PlayerState>()(
       togglePlay: () => set(state => { state.isPlaying = !state.isPlaying }),
       
       setVolume: (val) => set({ volume: Math.max(0, Math.min(1, val)) }),
+      
+      // 新增：增加音量
+      increaseVolume: (amount = 0.1) => set(state => {
+        state.volume = Math.min(1, state.volume + amount);
+      }),
+      
+      // 新增：减少音量
+      decreaseVolume: (amount = 0.1) => set(state => {
+        state.volume = Math.max(0, state.volume - amount);
+      }),
 
       nextSong: () => set(state => {
         const playlist = state.playlists.find((p: PlaylistData) => p.id === state.activePlaylistId);
@@ -188,7 +200,7 @@ export const usePlayerStore = create<PlayerState>()(
         state.isLiked = false;
       }),
 
-      prevSong: (currentTime) => set(state => {
+      prevSong: (currentTime = 0) => set(state => {
         if (currentTime > 3) return; 
         const playlist = state.playlists.find((p: PlaylistData) => p.id === state.activePlaylistId);
         if (!playlist || playlist.songs.length === 0) return;

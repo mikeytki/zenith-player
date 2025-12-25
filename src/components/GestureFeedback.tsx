@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hand, Play, Pause, SkipForward } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, ArrowLeft, ArrowRight, ArrowUp, ArrowDown } from 'lucide-react';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -56,9 +56,21 @@ const GestureFeedback: React.FC = () => {
         icon = <Pause size={48} className="fill-current" />;
         text = 'Pause';
         break;
-      case 'PINCH':
+      case 'SWIPE_LEFT':
+        icon = <SkipBack size={48} />;
+        text = 'Previous';
+        break;
+      case 'SWIPE_RIGHT':
         icon = <SkipForward size={48} />;
-        text = 'Next Song';
+        text = 'Next';
+        break;
+      case 'SWIPE_UP':
+        icon = <Volume2 size={48} />;
+        text = 'Volume Up';
+        break;
+      case 'SWIPE_DOWN':
+        icon = <VolumeX size={48} />;
+        text = 'Volume Down';
         break;
     }
 
@@ -169,26 +181,47 @@ const GestureFeedback: React.FC = () => {
 
       {/* 手势指南 */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] pointer-events-none">
-        <div className="flex items-center gap-6 px-6 py-3 bg-black/60 backdrop-blur-md rounded-full border border-white/10 text-white text-sm">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center">
-              <Play size={16} className="fill-current" />
+        <div className="flex flex-wrap items-center justify-center gap-4 px-6 py-3 bg-black/60 backdrop-blur-md rounded-full border border-white/10 text-white text-xs">
+          <div className="flex items-center gap-1.5">
+            <div className="w-6 h-6 rounded-full bg-indigo-500/20 flex items-center justify-center">
+              <Play size={12} className="fill-current" />
             </div>
-            <span>Open Palm</span>
+            <span>✋ 张开</span>
           </div>
           <div className="w-px h-4 bg-white/20" />
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center">
-              <Pause size={16} className="fill-current" />
+          <div className="flex items-center gap-1.5">
+            <div className="w-6 h-6 rounded-full bg-indigo-500/20 flex items-center justify-center">
+              <Pause size={12} className="fill-current" />
             </div>
-            <span>Fist</span>
+            <span>✊ 握拳</span>
           </div>
           <div className="w-px h-4 bg-white/20" />
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center">
-              <SkipForward size={16} />
+          <div className="flex items-center gap-1.5">
+            <div className="w-6 h-6 rounded-full bg-indigo-500/20 flex items-center justify-center">
+              <ArrowLeft size={12} />
             </div>
-            <span>Pinch</span>
+            <span>👈 上一首</span>
+          </div>
+          <div className="w-px h-4 bg-white/20" />
+          <div className="flex items-center gap-1.5">
+            <div className="w-6 h-6 rounded-full bg-indigo-500/20 flex items-center justify-center">
+              <ArrowRight size={12} />
+            </div>
+            <span>👉 下一首</span>
+          </div>
+          <div className="w-px h-4 bg-white/20" />
+          <div className="flex items-center gap-1.5">
+            <div className="w-6 h-6 rounded-full bg-indigo-500/20 flex items-center justify-center">
+              <ArrowUp size={12} />
+            </div>
+            <span>👆 音量+</span>
+          </div>
+          <div className="w-px h-4 bg-white/20" />
+          <div className="flex items-center gap-1.5">
+            <div className="w-6 h-6 rounded-full bg-indigo-500/20 flex items-center justify-center">
+              <ArrowDown size={12} />
+            </div>
+            <span>👇 音量-</span>
           </div>
         </div>
       </div>
