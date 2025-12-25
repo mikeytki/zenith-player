@@ -15,7 +15,6 @@ const CONFIDENCE_THRESHOLD = 0.5;
 // 滑动检测参数
 const SWIPE_THRESHOLD = 0.15; // 滑动距离阈值（归一化坐标）
 const SWIPE_TIME_WINDOW = 500; // 滑动时间窗口（毫秒）
-const POSITION_HISTORY_SIZE = 10; // 位置历史记录数量
 
 interface PositionRecord {
   x: number;
@@ -81,8 +80,11 @@ const HandDetector: React.FC = () => {
     // 添加当前位置到历史
     positionHistoryRef.current.push({ x: currentX, y: currentY, timestamp: now });
     
-    // 保持历史记录在限定大小内
-    if (positionHistoryRef.current.length > POSITION_HISTORY_SIZE) {
+    // 移除时间窗口之外的记录（保持 500ms 内的轨迹）
+    while (
+      positionHistoryRef.current.length > 0 &&
+      now - positionHistoryRef.current[0].timestamp > SWIPE_TIME_WINDOW
+    ) {
       positionHistoryRef.current.shift();
     }
     
@@ -96,10 +98,9 @@ const HandDetector: React.FC = () => {
       return 'NONE';
     }
     
-    // 获取时间窗口内的起始位置
-    const windowStart = now - SWIPE_TIME_WINDOW;
-    const startRecord = positionHistoryRef.current.find(r => r.timestamp >= windowStart);
-    
+    // 获取最早一帧作为比较基准
+    const startRecord = positionHistoryRef.current[0];
+
     if (!startRecord) {
       return 'NONE';
     }
